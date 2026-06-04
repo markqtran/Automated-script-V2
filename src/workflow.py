@@ -11,7 +11,7 @@ from .premiere_launch import launch_premiere_automation
 from .project_paths import project_root, video_folder_name
 from .scripts import get_script_by_number, resolve_project_folder
 from .sd_compare import compare_sd_cards_from_config, print_compare_report
-from .watch_upload import watch_and_upload
+from .watch_upload import watch_and_backup_hdd, watch_and_upload
 
 console = Console()
 
@@ -23,6 +23,7 @@ def run_full_workflow(
     refresh: bool = False,
     skip_ingest: bool = False,
     open_premiere: bool = True,
+    wait_backup: bool = False,
     watch_upload: bool = False,
     dry_run: bool = False,
 ) -> None:
@@ -31,7 +32,8 @@ def run_full_workflow(
     2. Create Video/ on SSD + HDD
     3. Copy SD card (PRIVATE/M4ROOT/CLIP...) into Video/
     4. Write automate_premiere.jsx + open Premiere
-    5. Optionally wait for proxies, back up SSD→HDD, upload to Drive
+    5. Optionally wait for proxies → copy Video/Proxies SSD → HDD
+    6. Optionally upload to Drive
     """
     entry = get_script_by_number(cfg, number, refresh=refresh)
     folder_name = entry.folder_name
@@ -84,8 +86,10 @@ def run_full_workflow(
 
     if watch_upload:
         watch_and_upload(cfg, number, dry_run=dry_run)
+    elif wait_backup:
+        watch_and_backup_hdd(cfg, number, dry_run=dry_run)
     else:
-        console.print(f"\n[bold]When proxies finish:[/bold]")
-        console.print(f"  python main.py watch-upload --number {number}  (HDD backup + Drive)")
-        console.print(f"  Or: python main.py backup-proxies --number {number}")
-        console.print(f"       python main.py upload-drive --number {number}")
+        console.print(f"\n[bold]When proxies finish on SSD (Soju):[/bold]")
+        console.print(f"  python main.py watch-backup --number {number}")
+        console.print(f"  Or: python main.py workflow --number {number} --wait-backup")
+        console.print(f"  Drive: python main.py watch-upload --number {number}")

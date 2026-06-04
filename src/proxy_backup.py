@@ -2,25 +2,78 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 from .ingest import _copy_file
-from .premiere_proxy import proxy_subfolder_name
-from .project_paths import project_root, proxies_dir, video_folder_name
+from .project_paths import project_root, proxies_dir, proxies_path, video_dir
 from .utils import format_bytes
 
 console = Console()
 
 
-def _hdd_proxies_path(cfg: dict, hdd_project: Path) -> Path:
-    """Mirror SSD layout: project/Video/Proxies/."""
-    video = video_folder_name(cfg)
-    proxy_name = proxy_subfolder_name(cfg)
-    found = proxies_dir(cfg, hdd_project)
-    return found if found else hdd_project / video / proxy_name
+def _proxy_files_under(folder: Path) -> list[Path]:
+    if not folder.is_dir():
+        return []
+    return sorted(
+        (p for p in folder.rglob("*") if p.is_file()),
+        key=lambda p: str(p).lower(),
+    )
+
+
+def _collect_ssd_proxy_files(cfg: dict, folder_name: str) -> tuple[Path, list[Path]]:
+    """
+    Prefer Video/Proxies/; if empty, include *_Proxy* files anywhere under Video/.
+    """
+    ssd_root, _ = project_root(cfg, folder_name)
+    canonical = proxies_path(cfg, folder_name, destination="ssd")
+    discovered = proxies_dir(cfg, ssd_root)
+    source_root = discovered if discovered else canonical
+
+    files = _proxy_files_under(source_root)
+    if files:
+        return source_root, files
+
+    video_root = video_dir(cfg, folder_name, destination="ssd")
+    fallback: list[Path] = []
+    for path in video_root.rglob("*"):
+        if not path.is_file():
+            continue
+        if "_proxy" in path.stem.lower():
+            fallback.append(path)
+
+    if fallback:
+        console.print(
+            f"[dim]Using {len(fallback)} proxy file(s) under Video/ "
+            f"(not only {canonical.name}/).[/dim]"
+        )
+        return video_root, sorted(fallback, key=lambda p: str(p).lower())
+
+    return canonical, []
+
+
+def _robocopy_proxies(src: Path, dest: Path) -> bool:
+    """Mirror proxy folder on Windows (fast, preserves timestamps)."""
+    robocopy = shutil.which("robocopy")
+    if not robocopy:
+        return False
+    dest.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        robocopy,
+        str(src),
+        str(dest),
+        "/E",
+        "/R:2",
+        "/W:2",
+        "/MT:8",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    # robocopy: exit code < 8 means success (0-7 are OK)
+    return result.returncode < 8
 
 
 def backup_proxies_to_hdd(
@@ -30,40 +83,36 @@ def backup_proxies_to_hdd(
     dry_run: bool = False,
 ) -> dict:
     """
-    Copy all files under SSD Video/Proxies/ to the same path on hdd_backup.
-
-    Skips files that already match on HDD (size + optional checksum from ingest).
+    Copy SSD Video/Proxies/ (or proxy outputs under Video/) to the same path on hdd_backup.
     """
     verify = cfg.get("ingest", {}).get("verify_checksum", True)
     ssd_root, hdd_root = project_root(cfg, folder_name)
-    ssd_proxy = proxies_dir(cfg, ssd_root)
-    hdd_proxy = _hdd_proxies_path(cfg, hdd_root)
+    ssd_proxy_root, sources = _collect_ssd_proxy_files(cfg, folder_name)
+    hdd_proxy = proxies_path(cfg, folder_name, destination="hdd", create=True)
 
     stats = {
         "copied": 0,
         "skipped": 0,
         "failed": 0,
         "bytes": 0,
-        "ssd_proxies": str(ssd_proxy) if ssd_proxy else "",
+        "ssd_proxies": str(ssd_proxy_root),
         "hdd_proxies": str(hdd_proxy),
     }
 
-    if not ssd_proxy or not ssd_proxy.is_dir():
-        console.print("[yellow]No proxies on SSD to back up.[/yellow]")
-        stats["skipped_reason"] = "no_ssd_proxies"
-        return stats
-
-    sources = sorted(
-        (p for p in ssd_proxy.rglob("*") if p.is_file()),
-        key=lambda p: str(p).lower(),
-    )
     if not sources:
-        console.print("[yellow]Proxies folder exists but has no files yet.[/yellow]")
-        stats["skipped_reason"] = "empty"
+        console.print("[yellow]No proxy files on SSD to back up.[/yellow]")
+        console.print(f"  Looked at: {ssd_proxy_root}")
+        console.print(
+            "  Wait for Media Encoder to finish, then run:\n"
+            f"    python main.py backup-proxies --number ..."
+        )
+        stats["skipped_reason"] = "no_files"
         return stats
 
     console.print("\n[bold]Backing up proxies SSD → HDD[/bold]")
-    console.print(f"  From: {ssd_proxy}")
+    console.print(f"  SSD ({ssd_root.drive or 'project'}): {ssd_root}")
+    console.print(f"  From: {ssd_proxy_root} ({len(sources)} file(s))")
+    console.print(f"  HDD ({hdd_root.drive or 'project'}): {hdd_root}")
     console.print(f"  To:   {hdd_proxy}\n")
 
     if dry_run:
@@ -71,7 +120,26 @@ def backup_proxies_to_hdd(
         stats["would_copy"] = len(sources)
         return stats
 
+    # Fast path: single canonical Proxies folder with normal layout
+    use_robocopy = (
+        ssd_proxy_root.resolve() == proxies_path(cfg, folder_name, destination="ssd").resolve()
+        and len(sources) == len(_proxy_files_under(ssd_proxy_root))
+        and _robocopy_proxies(ssd_proxy_root, hdd_proxy)
+    )
+    if use_robocopy:
+        for path in _proxy_files_under(hdd_proxy):
+            stats["bytes"] += path.stat().st_size
+        stats["copied"] = len(_proxy_files_under(hdd_proxy))
+        console.print(f"[green]Robocopy mirror complete.[/green] {stats['copied']} file(s) on HDD")
+        console.print(f"  Data: {format_bytes(stats['bytes'])}")
+        return stats
+
     hdd_proxy.mkdir(parents=True, exist_ok=True)
+    copy_root = (
+        ssd_proxy_root
+        if ssd_proxy_root.resolve() == proxies_path(cfg, folder_name, destination="ssd").resolve()
+        else None
+    )
 
     with Progress(
         SpinnerColumn(),
@@ -82,8 +150,12 @@ def backup_proxies_to_hdd(
     ) as progress:
         task = progress.add_task("Proxies → HDD...", total=len(sources))
         for src in sources:
-            rel = src.relative_to(ssd_proxy)
-            dest = hdd_proxy / rel
+            if copy_root:
+                rel = src.relative_to(copy_root)
+                dest = hdd_proxy / rel
+            else:
+                rel = src.relative_to(video_dir(cfg, folder_name, destination="ssd"))
+                dest = hdd_proxy.parent / rel
             progress.update(task, description=str(rel)[:50])
             ok, msg = _copy_file(src, dest, verify, dry_run=False)
             if ok:
@@ -101,6 +173,11 @@ def backup_proxies_to_hdd(
     console.print(f"  Skipped: {stats['skipped']} (already on HDD)")
     if stats["failed"]:
         console.print(f"  [red]Failed:  {stats['failed']}[/red]")
+    if stats["copied"] == 0 and stats["skipped"] == 0:
+        console.print(
+            "[red]Nothing copied. Check hdd_backup drive letter in config.yaml "
+            "and that the HDD is plugged in.[/red]"
+        )
     console.print(f"  Data:    {format_bytes(stats['bytes'])}")
 
     return stats

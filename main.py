@@ -6,8 +6,9 @@ Usage:
   python main.py new-project --number 003  # Create folders from [01] Scripts
   python main.py list-scripts             # Show all script numbers/titles
   python main.py workflow --number 003       # Full pipeline: folders + ingest + Premiere script
-  python main.py watch-upload --number 003 # Proxies done → HDD backup → Drive
-  python main.py backup-proxies --number 003  # Copy Video/Proxies SSD → HDD only
+  python main.py watch-backup --number 003   # Wait for proxies → copy SSD → HDD
+  python main.py watch-upload --number 003   # Wait → HDD backup → Drive upload
+  python main.py backup-proxies --number 003 # Copy Video/Proxies now (if already done)
   python main.py ingest             # Ingest without compare report
   python main.py proxies --folder   # Create FFmpeg proxies
   python main.py upload-drive       # Upload proxies + project to Google Drive
@@ -35,7 +36,7 @@ from src.project_paths import project_root
 from src.scripts import resolve_project_folder
 from src.sd_compare import compare_sd_cards_from_config, print_compare_report
 from src.proxy_backup import backup_proxies_to_hdd
-from src.watch_upload import watch_and_upload
+from src.watch_upload import watch_and_backup_hdd, watch_and_upload
 from src.workflow import run_full_workflow
 
 console = Console()
@@ -156,7 +157,12 @@ def cmd_new_project(
 @click.option("--refresh", is_flag=True, help="Refresh script list from Google Drive")
 @click.option("--skip-ingest", is_flag=True, help="Skip SD card copy (folders + Premiere only)")
 @click.option("--no-premiere", is_flag=True, help="Do not launch Premiere")
-@click.option("--watch-upload", is_flag=True, help="After proxies finish, upload to Google Drive")
+@click.option(
+    "--wait-backup",
+    is_flag=True,
+    help="After proxies finish, copy Video/Proxies from SSD to hdd_backup",
+)
+@click.option("--watch-upload", is_flag=True, help="Wait for proxies, HDD backup, then upload to Drive")
 @click.option("--dry-run", is_flag=True)
 @click.pass_context
 def workflow(
@@ -165,6 +171,7 @@ def workflow(
     refresh: bool,
     skip_ingest: bool,
     no_premiere: bool,
+    wait_backup: bool,
     watch_upload: bool,
     dry_run: bool,
 ) -> None:
@@ -178,7 +185,28 @@ def workflow(
         refresh=refresh,
         skip_ingest=skip_ingest,
         open_premiere=not no_premiere,
+        wait_backup=wait_backup,
         watch_upload=watch_upload,
+        dry_run=dry_run,
+    )
+
+
+@cli.command("watch-backup")
+@click.option("--number", "-n", required=True, help="3-digit script number")
+@click.option("--timeout", default=180, help="Max minutes to wait for proxies on SSD")
+@click.option("--dry-run", is_flag=True)
+@click.pass_context
+def cmd_watch_backup(
+    ctx: click.Context,
+    number: str,
+    timeout: int,
+    dry_run: bool,
+) -> None:
+    """Wait for Media Encoder to finish on SSD, then copy Video/Proxies to HDD."""
+    watch_and_backup_hdd(
+        ctx.obj["cfg"],
+        number,
+        timeout_minutes=timeout,
         dry_run=dry_run,
     )
 
@@ -290,9 +318,10 @@ def daily(
     console.print("  3. Right-click clips > Proxy > Create Proxies (ProRes / Quarter / your preset)")
     console.print("  4. Wait for Media Encoder to finish")
     if number:
-        console.print(f"  5. Upload: python main.py upload-drive --number {number}")
+        console.print(f"  5. HDD backup: python main.py watch-backup --number {number}")
+        console.print(f"  6. Drive:      python main.py upload-drive --number {number}")
     else:
-        console.print(f"  5. Upload: python main.py upload-drive -f \"{stats['ssd_path']}\"")
+        console.print(f"  5. HDD backup: python main.py backup-proxies -f \"{stats['ssd_path']}\"")
 
 
 @cli.command()
@@ -305,13 +334,24 @@ def proxies(ctx: click.Context, folder: str, dry_run: bool) -> None:
 
 
 @cli.command("backup-proxies")
-@click.option("--number", "-n", required=True, help="3-digit script number")
+@click.option("--number", "-n", default=None, help="3-digit script number")
+@click.option("--folder", "-f", default=None, help="SSD project folder (e.g. F:\\[003] Title)")
 @click.option("--dry-run", is_flag=True)
 @click.pass_context
-def cmd_backup_proxies(ctx: click.Context, number: str, dry_run: bool) -> None:
+def cmd_backup_proxies(
+    ctx: click.Context,
+    number: str | None,
+    folder: str | None,
+    dry_run: bool,
+) -> None:
     """Copy Video/Proxies from SSD (Soju) to matching folder on hdd_backup."""
     cfg = ctx.obj["cfg"]
-    folder_name = resolve_project_folder(cfg, number)
+    if number:
+        folder_name = resolve_project_folder(cfg, number)
+    elif folder:
+        folder_name = Path(folder).name
+    else:
+        raise click.UsageError("Provide --number or --folder")
     backup_proxies_to_hdd(cfg, folder_name, dry_run=dry_run)
 
 

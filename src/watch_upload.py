@@ -1,4 +1,4 @@
-"""Wait for Premiere/Media Encoder to finish proxies, then upload to Google Drive."""
+"""Wait for Premiere/Media Encoder proxies, back up to HDD, optional Drive upload."""
 
 from __future__ import annotations
 
@@ -15,6 +15,10 @@ from .scripts import resolve_project_folder
 console = Console()
 
 
+def _proxy_files_ready(proxy_path: Path) -> bool:
+    return proxy_path.is_dir() and any(f.is_file() for f in proxy_path.rglob("*"))
+
+
 def _folder_stable(path: Path, wait_seconds: int = 30) -> bool:
     """True if no file in tree changed size/mtime for wait_seconds."""
     if not path.exists():
@@ -29,6 +33,9 @@ def _folder_stable(path: Path, wait_seconds: int = 30) -> bool:
         return snap
 
     last = snapshot()
+    if not last:
+        return False
+
     stable_for = 0
     poll = 5
 
@@ -41,7 +48,61 @@ def _folder_stable(path: Path, wait_seconds: int = 30) -> bool:
             stable_for = 0
             last = current
 
-    return bool(last)
+    return True
+
+
+def wait_for_proxies(
+    cfg: dict,
+    number: str,
+    *,
+    timeout_minutes: int = 180,
+    stable_seconds: int = 30,
+) -> tuple[str, Path] | None:
+    """Block until SSD Video/Proxies has stable proxy files. Returns folder_name, ssd_path."""
+    folder_name = resolve_project_folder(cfg, number)
+    ssd_path, _ = project_root(cfg, folder_name)
+    proxy_path = proxies_dir(cfg, ssd_path)
+
+    console.print(f"\n[bold]Waiting for proxies on SSD[/bold] — {folder_name}")
+    console.print(f"  Project: {ssd_path}")
+    console.print(f"  Watching: {proxy_path or (ssd_path / 'Video' / 'Proxies')}\n")
+
+    deadline = time.time() + timeout_minutes * 60
+    while time.time() < deadline:
+        proxy_path = proxies_dir(cfg, ssd_path)
+        if proxy_path and _proxy_files_ready(proxy_path):
+            console.print(f"[green]Proxies found:[/green] {proxy_path}")
+            if _folder_stable(proxy_path, stable_seconds):
+                console.print("[green]Proxies complete (files stable).[/green]")
+                return folder_name, ssd_path
+            console.print("[dim]Proxies still encoding, waiting...[/dim]")
+        else:
+            console.print("[dim]No proxy files yet — Media Encoder still working...[/dim]")
+        time.sleep(10)
+
+    console.print("[red]Timed out waiting for proxies on SSD.[/red]")
+    return None
+
+
+def watch_and_backup_hdd(
+    cfg: dict,
+    number: str,
+    *,
+    timeout_minutes: int = 180,
+    stable_seconds: int = 30,
+    dry_run: bool = False,
+) -> dict:
+    """Wait for SSD proxies, then copy Video/Proxies → HDD backup."""
+    waited = wait_for_proxies(
+        cfg, number, timeout_minutes=timeout_minutes, stable_seconds=stable_seconds
+    )
+    if not waited:
+        return {"success": False, "reason": "timeout"}
+
+    folder_name, _ = waited
+    backup_stats = backup_proxies_to_hdd(cfg, folder_name, dry_run=dry_run)
+    ok = backup_stats.get("copied", 0) > 0 or backup_stats.get("skipped", 0) > 0
+    return {"success": ok, "backup": backup_stats}
 
 
 def watch_and_upload(
@@ -52,33 +113,14 @@ def watch_and_upload(
     stable_seconds: int = 30,
     dry_run: bool = False,
 ) -> dict:
-    """
-    Poll Video/Proxies until stable, copy proxies SSD → HDD, then upload to Drive.
-    """
-    folder_name = resolve_project_folder(cfg, number)
-    ssd_path, _ = project_root(cfg, folder_name)
-    proxy_path = proxies_dir(cfg, ssd_path)
-
-    console.print(f"\n[bold]Watching for proxies[/bold] — {folder_name}")
-    console.print(f"  Project: {ssd_path}")
-    console.print(f"  Waiting for: {proxy_path or '(Video/Proxies)'}\n")
-
-    deadline = time.time() + timeout_minutes * 60
-    while time.time() < deadline:
-        proxy_path = proxies_dir(cfg, ssd_path)
-        if proxy_path and any(proxy_path.rglob("*")):
-            console.print(f"[green]Proxies folder found:[/green] {proxy_path}")
-            if _folder_stable(proxy_path, stable_seconds):
-                console.print("[green]Proxies look complete (files stable).[/green]")
-                break
-            console.print("[dim]Proxies still changing, waiting...[/dim]")
-        else:
-            console.print("[dim]No proxies yet — finish Create Proxies in Premiere/Media Encoder...[/dim]")
-        time.sleep(10)
-    else:
-        console.print("[red]Timed out waiting for proxies.[/red]")
+    """Wait for proxies, copy SSD → HDD, then upload Proxies + .prproj to Drive."""
+    waited = wait_for_proxies(
+        cfg, number, timeout_minutes=timeout_minutes, stable_seconds=stable_seconds
+    )
+    if not waited:
         return {"success": False, "reason": "timeout"}
 
+    folder_name, ssd_path = waited
     backup_stats = backup_proxies_to_hdd(cfg, folder_name, dry_run=dry_run)
 
     if dry_run:

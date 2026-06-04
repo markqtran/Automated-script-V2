@@ -77,18 +77,41 @@ def video_dir(cfg: dict, folder_name: str, *, destination: str = "ssd") -> Path:
     return root / video_folder_name(cfg)
 
 
+def proxies_path(
+    cfg: dict,
+    folder_name: str,
+    *,
+    destination: str = "ssd",
+    create: bool = False,
+) -> Path:
+    """Canonical path: project/[###] Title/Video/Proxies/ on SSD or HDD."""
+    ssd, hdd = project_root(cfg, folder_name)
+    root = ssd if destination == "ssd" else hdd
+    path = root / video_folder_name(cfg) / proxies_folder_name(cfg)
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def proxies_dir(cfg: dict, project_folder: str | Path) -> Path | None:
     """
-    Find Proxies folder for Google Drive upload.
-    Premiere (next to original media) creates: Project/Video/Proxies/
+    Find Proxies folder with at least one file (for upload / watch).
+    Prefers Project/Video/Proxies/, then legacy Project/Proxies/.
     """
     root = normalize_path(project_folder)
     video = video_folder_name(cfg)
     proxy_name = proxies_folder_name(cfg)
-    for candidate in (root / video / proxy_name, root / proxy_name):
-        if candidate.is_dir():
-            return candidate
-    return None
+    candidates = (root / video / proxy_name, root / proxy_name)
+    best: Path | None = None
+    for candidate in candidates:
+        if not candidate.is_dir():
+            continue
+        if any(candidate.rglob("*")):
+            if any(f.is_file() for f in candidate.rglob("*")):
+                return candidate
+        if best is None:
+            best = candidate
+    return best
 
 
 def find_prproj(cfg: dict, project_folder: str | Path) -> Path | None:

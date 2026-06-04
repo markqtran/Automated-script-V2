@@ -299,7 +299,7 @@ def generate_premiere_setup_script(
             proxyMsg =
                 "Encoding " + queued + " proxy file(s) to SSD:\\n" + PROXIES_DIR + "\\n\\n" +
                 "Files appear when Media Encoder FINISHES (not instant).\\n" +
-                "Then: python main.py watch-upload --number " + (SCRIPT_NUMBER || "XXX") + "\\n\\n";
+                "Then: python main.py watch-backup --number " + (SCRIPT_NUMBER || "XXX") + "\\n\\n";
         }} else if (!encodePreset) {{
             proxyMsg =
                 "Could not find ENCODING preset (.epr). No Media Encoder jobs queued.\\n\\n" +
@@ -326,7 +326,8 @@ def generate_premiere_setup_script(
         "Imported " + mediaPaths.length + " clip(s) from Video/.\\n\\n" +
         proxyMsg +
         "When proxies finish:\\n" +
-        "python main.py upload-drive --number " + (SCRIPT_NUMBER || "XXX")
+        "HDD backup: python main.py watch-backup --number " + (SCRIPT_NUMBER || "XXX") + "\\n" +
+        "Drive:      python main.py upload-drive --number " + (SCRIPT_NUMBER || "XXX")
     );
 }})();
 """
