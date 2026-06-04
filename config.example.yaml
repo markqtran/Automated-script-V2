@@ -35,6 +35,9 @@ google_drive:
 premiere:
   exe_path: ""
   auto_run_script: true   # Launch with /C es.processFile automate_premiere.jsx (close Premiere first)
+  auto_create_proxies: true
+  # Export your Ingest Preset from Media Encoder (Quarter + ProRes QT Proxy + Proxy Icon):
+  proxy_ingest_preset: ""   # e.g. templates/NDP_Proxy_Ingest.epr — or leave empty to auto-search
 
 # Project folder layout (matches Premiere workflow)
 project:
