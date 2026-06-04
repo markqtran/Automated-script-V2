@@ -202,7 +202,7 @@ def cmd_watch_backup(
     timeout: int,
     dry_run: bool,
 ) -> None:
-    """Wait for Media Encoder to finish on SSD, then copy Video/Proxies to HDD."""
+    """Wait for Media Encoder on SSD, then copy Video/Proxies and .prproj to HDD."""
     watch_and_backup_hdd(
         ctx.obj["cfg"],
         number,
@@ -344,7 +344,7 @@ def cmd_backup_proxies(
     folder: str | None,
     dry_run: bool,
 ) -> None:
-    """Copy Video/Proxies from SSD (Soju) to matching folder on hdd_backup."""
+    """Copy Video/Proxies and .prproj from SSD (Soju) to matching folder on hdd_backup."""
     cfg = ctx.obj["cfg"]
     if number:
         folder_name = resolve_project_folder(cfg, number)
