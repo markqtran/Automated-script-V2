@@ -77,3 +77,6 @@ ingest:
   verify_checksum: true
   prefer_card_with_more_files: true
   date_folder_format: "%Y-%m-%d"
+  clip_contents_only: true       # Only copy files inside CLIP/ on the SD card
+  clip_folder_name: "CLIP"        # Folder name on SD card (Sony-style: PRIVATE/M4ROOT/CLIP)
+  flatten_clip: false             # true = drop all files directly in Video/ (no subfolders)
