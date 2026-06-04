@@ -69,32 +69,48 @@ def cmd_list_scripts(ctx: click.Context, refresh: bool) -> None:
 def cmd_list_proxy_presets(ctx: click.Context) -> None:
     """List .epr presets on this PC (for proxy automation setup)."""
     from src.premiere_proxy import (
-        list_discovered_presets,
         resolve_encode_preset_path,
         resolve_proxy_preset_path,
+        top_scored_presets,
     )
 
     cfg = ctx.obj["cfg"]
+    ingest_path = resolve_proxy_preset_path(cfg)
+    encode_path = resolve_encode_preset_path(cfg)
+
     console.print("\n[bold]Configured proxy presets[/bold]")
-    console.print(f"  Ingest: {resolve_proxy_preset_path(cfg) or '(not set)'}")
-    console.print(f"  Encode: {resolve_encode_preset_path(cfg) or '(not set)'}")
+    console.print(f"  Ingest: {ingest_path or '(not set)'}")
+    console.print(f"  Encode: {encode_path or '(not set)'}")
 
-    rows = list_discovered_presets()
-    if not rows:
-        console.print("\n[yellow]No .epr files found under Adobe folders.[/yellow]")
-        console.print("  Create an Ingest Preset in Media Encoder, then copy it to:")
-        console.print("  templates/NDP_Proxy_Ingest.epr")
-        return
+    if ingest_path and encode_path and ingest_path == encode_path:
+        console.print(
+            "\n[yellow]Encode must NOT be an IngestPresets file.[/yellow] "
+            "Automation uses encodeFile → Video/Proxies/ on the SSD."
+        )
 
-    console.print(f"\n[bold]Found {len(rows)} .epr file(s) on this PC[/bold] (higher score = better match)\n")
-    for label, path in rows[:40]:
-        console.print(f"  [{label}] {path}")
-    if len(rows) > 40:
-        console.print(f"  ... and {len(rows) - 40} more")
-    console.print(
-        "\n[dim]Copy your ingest preset to templates/NDP_Proxy_Ingest.epr "
-        "or set premiere.proxy_ingest_preset in config.yaml[/dim]\n"
-    )
+    ingest_rows = top_scored_presets(ingest=True)
+    encode_rows = top_scored_presets(ingest=False)
+
+    if ingest_rows:
+        console.print("\n[bold]Top ingest presets[/bold] (Create Proxies / manual)\n")
+        for score, path in ingest_rows:
+            console.print(f"  [{score:2d}] {path}")
+
+    if encode_rows:
+        console.print("\n[bold]Top encode presets[/bold] (auto proxy queue — NOT IngestPresets)\n")
+        for score, path in encode_rows:
+            console.print(f"  [{score:2d}] {path}")
+    else:
+        console.print("\n[yellow]No export preset auto-detected on this PC.[/yellow]")
+
+    console.print("\n[bold]Required for empty Video/Proxies fix[/bold]")
+    console.print("  1. Media Encoder → + → [bold]Create Preset[/bold] (not Ingest)")
+    console.print("     QuickTime · ProRes QuickTime Proxy · Quarter")
+    console.print("  2. Reveal Preset File → copy to:")
+    console.print("     templates/NDP_Proxy_Encode.epr")
+    console.print("  3. Re-run: python main.py list-proxy-presets")
+    console.print("     Encode should show templates/NDP_Proxy_Encode.epr")
+    console.print("\n[dim]Optional: premiere.proxy_encode_preset in config.yaml[/dim]\n")
 
 
 @cli.command("install-premiere")

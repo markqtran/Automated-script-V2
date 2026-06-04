@@ -36,9 +36,9 @@ premiere:
   exe_path: ""
   auto_run_script: true   # Launch with /C es.processFile automate_premiere.jsx (close Premiere first)
   auto_create_proxies: true
-  # REQUIRED for auto proxies — export from Media Encoder (see templates/README.txt):
-  proxy_ingest_preset: ""   # e.g. templates/NDP_Proxy_Ingest.epr (matches Create Proxies dialog)
-  proxy_encode_preset: ""   # optional fallback .epr for Media Encoder queue
+  # REQUIRED for auto proxies — see templates/README.txt:
+  proxy_encode_preset: ""   # templates/NDP_Proxy_Encode.epr (Media Encoder export preset)
+  proxy_ingest_preset: ""   # optional; manual Create Proxies only
 
 # Project folder layout (matches Premiere workflow)
 project:
