@@ -242,8 +242,9 @@ def mirror(ctx: click.Context, dry_run: bool) -> None:
 @click.option("--project-folder", "-p", required=True, help="Completed project folder on SSD")
 @click.option("--hdd-folder", "-h", default=None, help="Matching folder on primary HDD")
 @click.option("--dry-run", is_flag=True)
+@click.option("--skip-mirror", is_flag=True, help="Skip mirroring to second HDD")
 @click.pass_context
-def finalize(ctx: click.Context, project_folder: str, hdd_folder: str | None, dry_run: bool) -> None:
+def finalize(ctx: click.Context, project_folder: str, hdd_folder: str | None, dry_run: bool, skip_mirror: bool) -> None:
     """End-of-project: audit assets, copy missing to HDD, mirror to second HDD."""
     cfg = ctx.obj["cfg"]
     if hdd_folder is None:
@@ -262,8 +263,11 @@ def finalize(ctx: click.Context, project_folder: str, hdd_folder: str | None, dr
     if not result["in_sync"] and not dry_run:
         console.print("\n[green]Missing files copied to primary HDD.[/green]")
 
-    console.print("\n[bold]Mirroring primary HDD to secondary HDD[/bold]")
-    mirror_backup(cfg, dry_run=dry_run)
+    if not skip_mirror:
+        console.print("\n[bold]Mirroring primary HDD to secondary HDD[/bold]")
+        mirror_backup(cfg, dry_run=dry_run)
+    else:
+        console.print("\n[dim]Mirror skipped (--skip-mirror).[/dim]")
 
 
 if __name__ == "__main__":

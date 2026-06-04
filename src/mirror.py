@@ -13,16 +13,44 @@ from .utils import normalize_path
 console = Console()
 
 
+def _mirror_drive_ready(path: Path) -> bool:
+    """Return False if the destination drive letter is not mounted (e.g. I: unplugged)."""
+    drive = path.drive
+    if drive:
+        return Path(f"{drive}\\").exists()
+    return path.parent.exists()
+
+
 def mirror_backup(cfg: dict, dry_run: bool = False) -> dict:
     """
     Mirror the entire HDD backup folder to the second hard drive.
     Uses robocopy on Windows for efficient mirroring; falls back to shutil.
+    Skips gracefully if the mirror drive is not connected or mirror is disabled.
     """
+    mirror_cfg = cfg.get("mirror", {})
+    if mirror_cfg.get("enabled") is False:
+        console.print("[yellow]Mirror skipped (disabled in config).[/yellow]")
+        return {"skipped": True, "reason": "disabled"}
+
     source = normalize_path(cfg["destinations"]["hdd_backup"])
     dest = normalize_path(cfg["destinations"]["hdd_backup_mirror"])
 
     if not source.exists():
         raise FileNotFoundError(f"Primary HDD backup not found: {source}")
+
+    if source == dest:
+        console.print("[yellow]Mirror skipped (source and dest are the same path).[/yellow]")
+        return {"skipped": True, "reason": "same_path"}
+
+    if not _mirror_drive_ready(dest):
+        console.print(
+            f"[yellow]Mirror skipped — second HDD not found at {dest.drive or dest}[/yellow]"
+        )
+        console.print(
+            "  Plug in the mirror drive or set hdd_backup_mirror in config.yaml, "
+            "or set mirror.enabled: false"
+        )
+        return {"skipped": True, "reason": "drive_not_found"}
 
     console.print("\n[bold]Mirroring HDD backup[/bold]")
     console.print(f"  Source: {source}")

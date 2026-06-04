@@ -12,7 +12,11 @@ sd_cards:
 destinations:
   ssd_editing: "E:\\"              # Soju — editing SSD (Premiere, proxies, project files)
   hdd_backup: "H:\\"               # Primary backup hard drive
-  hdd_backup_mirror: "I:\\"        # Second hard drive (mirror of primary)
+  hdd_backup_mirror: "I:\\"        # Second HDD (mirror) — optional if not plugged in
+
+# Mirror D: -> I: (optional — skip if second drive not connected)
+mirror:
+  enabled: true                   # set false if Ethan has no I: drive
 
 # [01] Scripts — PDF scripts used to auto-name new Premiere projects
 # https://drive.google.com/drive/folders/1RUebu5qPaac66hkgrJq5O0fz4guteIHP
