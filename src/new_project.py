@@ -16,6 +16,9 @@ from .scripts import get_script_by_number, get_scripts, print_scripts_table
 
 console = Console()
 
+TEMPLATE_PATH = Path("templates") / "project_template.prproj"
+PROJECT_META = ".project_info.json"
+
 
 def _find_premiere_exe(cfg: dict) -> Path | None:
     premiere_cfg = cfg.get("premiere", {})
