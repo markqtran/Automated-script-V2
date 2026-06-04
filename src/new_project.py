@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import glob
 import json
-import os
 import shutil
-import subprocess
 from pathlib import Path
 
 from rich.console import Console
 
 from .premiere_jsx import write_premiere_setup_script
-from .project_paths import project_root, video_dir, video_folder_name
+from .premiere_launch import launch_premiere_automation
+from .project_paths import project_root, video_folder_name
 from .scripts import get_script_by_number, get_scripts, print_scripts_table
 
 console = Console()
@@ -21,33 +19,18 @@ TEMPLATE_PATH = Path("templates") / "project_template.prproj"
 PROJECT_META = ".project_info.json"
 
 
-def _find_premiere_exe(cfg: dict) -> Path | None:
-    premiere_cfg = cfg.get("premiere", {})
-    if premiere_cfg.get("exe_path"):
-        path = Path(premiere_cfg["exe_path"])
-        if path.exists():
-            return path
-
-    patterns = [
-        r"C:\Program Files\Adobe\Adobe Premiere Pro *\Adobe Premiere Pro.exe",
-        r"C:\Program Files\Adobe\Adobe Premiere Pro *\Adobe Premiere Pro.exe",
-    ]
-    matches: list[str] = []
-    for pattern in patterns:
-        matches.extend(glob.glob(pattern))
-    if not matches:
-        return None
-    return Path(sorted(matches)[-1])
-
-
 def _write_premiere_jsx(
     cfg: dict,
     ssd_path: Path,
     folder_name: str,
     prproj_path: Path,
+    *,
+    script_number: str = "",
 ) -> Path:
     """Write automate_premiere.jsx for import + proxy workflow in Premiere."""
-    return write_premiere_setup_script(cfg, ssd_path, folder_name, prproj_path)
+    return write_premiere_setup_script(
+        cfg, ssd_path, folder_name, prproj_path, script_number=script_number
+    )
 
 
 def _write_project_meta(ssd_path: Path, entry) -> None:
@@ -65,6 +48,8 @@ def _create_premiere_project(
     ssd_path: Path,
     folder_name: str,
     dry_run: bool,
+    *,
+    script_number: str = "",
 ) -> Path:
     prproj_path = ssd_path / f"{folder_name}.prproj"
     if dry_run:
@@ -79,28 +64,29 @@ def _create_premiere_project(
             "  Save a blank project with your Ingest/Proxy settings as templates/project_template.prproj"
         )
 
-    _write_premiere_jsx(cfg, ssd_path, folder_name, prproj_path)
+    _write_premiere_jsx(cfg, ssd_path, folder_name, prproj_path, script_number=script_number)
     return prproj_path
 
 
-def _open_premiere(cfg: dict, prproj_path: Path | None, ssd_path: Path) -> None:
-    premiere = _find_premiere_exe(cfg)
-    if not premiere:
+def _open_premiere(
+    cfg: dict,
+    prproj_path: Path,
+    ssd_path: Path,
+    *,
+    jsx_path: Path | None = None,
+) -> None:
+    """Launch Premiere and auto-run automate_premiere.jsx (creates project on SSD)."""
+    jsx = jsx_path or (ssd_path / "automate_premiere.jsx")
+    launched = launch_premiere_automation(
+        cfg,
+        jsx_path=jsx,
+        prproj_path=prproj_path,
+        project_folder=ssd_path,
+    )
+    if not launched:
         console.print(
-            "[yellow]Adobe Premiere Pro not found.[/yellow] "
-            "Set premiere.exe_path in config.yaml or open Premiere manually."
+            f"  Manual fallback: File > Scripts > Run Script File > {jsx.name}"
         )
-        os.startfile(ssd_path)  # noqa: S606 — opens folder in Explorer on Windows
-        return
-
-    if prproj_path and prproj_path.exists():
-        console.print(f"Opening Premiere with {prproj_path.name}...")
-        subprocess.Popen([str(premiere), str(prproj_path)], shell=False)
-    else:
-        console.print("Opening Premiere — run the automation script:")
-        console.print(f"  File > Scripts > Run Script File > {ssd_path / 'automate_premiere.jsx'}")
-        subprocess.Popen([str(premiere)], shell=False)
-        os.startfile(ssd_path)  # noqa: S606
 
 
 def setup_new_project(
@@ -142,23 +128,22 @@ def setup_new_project(
     (ssd_path / video_name).mkdir(exist_ok=True)
     (hdd_path / video_name).mkdir(exist_ok=True)
     _write_project_meta(ssd_path, entry)
-    prproj_path = _create_premiere_project(cfg, ssd_path, entry.folder_name, dry_run=False)
+    prproj_path = _create_premiere_project(
+        cfg, ssd_path, entry.folder_name, dry_run=False, script_number=entry.number
+    )
 
     console.print(f"\n[green]Project folders created.[/green]")
     console.print(f"  SSD (Soju): {ssd_path}")
     console.print(f"  Video:      {ssd_path / video_name}/")
     console.print(f"  HDD backup: {hdd_path}")
 
+    jsx_path = ssd_path / "automate_premiere.jsx"
     if open_premiere:
-        _open_premiere(cfg, prproj_path if prproj_path.exists() else None, ssd_path)
+        _open_premiere(cfg, prproj_path, ssd_path, jsx_path=jsx_path)
     else:
         console.print("\n[bold]Next steps:[/bold]")
-        if prproj_path.exists():
-            console.print(f"  Open in Premiere: {prproj_path}")
-        else:
-            console.print("  1. Open Adobe Premiere Pro")
-            console.print(f"  2. File > Scripts > Run Script File > {ssd_path / 'automate_premiere.jsx'}")
-        console.print(f"  3. Import the Video folder in Premiere, create proxies (your preset)")
+        console.print(f"  python main.py new-project --number {entry.number} --open-premiere")
+        console.print(f"  Or close Premiere and run with --open-premiere to auto-create the project on the SSD")
         console.print(f"  4. After filming: python main.py daily --number {entry.number}")
         console.print(f"  5. After proxies finish: python main.py upload-drive --number {entry.number}")
 

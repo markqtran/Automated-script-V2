@@ -1,0 +1,71 @@
+# Soju = editing SSD (E:). SD cards = G: (and backup slot). H: = backup HDD.
+
+# SD cards — camera cards (NOT the Soju SSD)
+sd_cards:
+  primary: "G:\\"      # Main SD card (camera slot 1)
+  backup: "F:\\"       # Backup SD card (slot 2) — update if different when both cards are in
+
+# Destinations after filming / Premiere workflow
+destinations:
+  ssd_editing: "E:\\"              # Soju — editing SSD (Premiere, proxies, project files)
+  hdd_backup: "H:\\"               # Primary backup hard drive
+  hdd_backup_mirror: "I:\\"        # Second HDD mirror (update letter if different)
+
+# [01] Scripts — PDF scripts used to name new projects
+# https://drive.google.com/drive/folders/1RUebu5qPaac66hkgrJq5O0fz4guteIHP
+scripts:
+  folder_id: "1RUebu5qPaac66hkgrJq5O0fz4guteIHP"
+
+# Google Drive — [04] Proxies/Project file
+# https://drive.google.com/drive/folders/1RWdJVs4LJKNMoDrRUTendfhD0uYy6VVl
+google_drive:
+  rclone_remote: "gdrive"
+  folder_id: "1RWdJVs4LJKNMoDrRUTendfhD0uYy6VVl"
+
+# Adobe Premiere Pro (optional — auto-detected if not set)
+premiere:
+  exe_path: ""
+  auto_run_script: true
+
+# Project folder layout (matches your Premiere workflow)
+project:
+  video_folder: "Video"
+
+# Proxies: use Premiere + Media Encoder (not FFmpeg)
+proxies:
+  enabled: false
+  subfolder: "Proxies"
+
+footage_extensions:
+  - ".mp4"
+  - ".mov"
+  - ".xml"
+  - ".mxf"
+  - ".avi"
+  - ".mkv"
+  - ".r3d"
+  - ".braw"
+
+project_extensions:
+  - ".prproj"
+
+asset_extensions:
+  - ".wav"
+  - ".mp3"
+  - ".aiff"
+  - ".png"
+  - ".jpg"
+  - ".jpeg"
+  - ".psd"
+  - ".aep"
+  - ".mogrt"
+  - ".mp4"
+  - ".mov"
+
+ingest:
+  verify_checksum: true
+  prefer_card_with_more_files: true
+  date_folder_format: "%Y-%m-%d"
+  clip_contents_only: true
+  clip_folder_name: "CLIP"
+  flatten_clip: false
