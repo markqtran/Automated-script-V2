@@ -47,6 +47,36 @@ def is_premiere_running() -> bool:
         return False
 
 
+def _try_elevated_create_flag(flag: Path) -> bool:
+    """Prompt Windows UAC to create extendscriptprqe.txt in Program Files."""
+    if flag.exists():
+        return True
+
+    script_body = f'New-Item -LiteralPath "{flag}" -ItemType File -Force'
+    script_path = Path(tempfile.gettempdir()) / "create_extendscriptprqe.ps1"
+    try:
+        script_path.write_text(script_body, encoding="utf-8")
+        subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                (
+                    "Start-Process -FilePath powershell.exe -Verb RunAs -Wait "
+                    f"-ArgumentList '-ExecutionPolicy','Bypass','-File','{script_path}'"
+                ),
+            ],
+            check=False,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    finally:
+        script_path.unlink(missing_ok=True)
+
+    return flag.exists()
+
+
 def ensure_extendscript_flag(premiere_exe: Path) -> tuple[bool, Path]:
     """
     Adobe requires an empty extendscriptprqe.txt beside Premiere.exe
@@ -75,6 +105,14 @@ def install_premiere_cli_scripting(cfg: dict) -> bool:
 
     console.print(f"Premiere: {premiere}")
     ok, flag = ensure_extendscript_flag(premiere)
+    if not ok:
+        console.print(
+            "[yellow]Need Administrator for Program Files.[/yellow] "
+            "Approve the UAC prompt if one appears..."
+        )
+        ok = _try_elevated_create_flag(flag)
+        if ok:
+            console.print(f"[green]Created[/green] {flag}")
     if ok:
         console.print(
             "\n[green]Premiere CLI scripting is enabled.[/green]\n"
@@ -85,12 +123,15 @@ def install_premiere_cli_scripting(cfg: dict) -> bool:
 
     console.print(
         f"\n[red]Could not create[/red] {flag}\n\n"
-        "  Run PowerShell [bold]as Administrator[/bold], then:\n"
-        f'  New-Item -Path "{flag}" -ItemType File -Force\n\n'
-        "  Or right-click PowerShell → Run as administrator:\n"
-        "  cd C:\\Users\\Ethan\\Automated-script\n"
-        "  .\\.venv\\Scripts\\Activate.ps1\n"
-        "  python main.py install-premiere\n"
+        "  [bold]Option A — Administrator PowerShell[/bold] (window title must say Administrator):\n"
+        f'  New-Item -LiteralPath "{flag}" -ItemType File -Force\n\n'
+        "  [bold]Option B — Notepad as Administrator[/bold]\n"
+        "  1. Start menu → Notepad → right-click → Run as administrator\n"
+        "  2. File → Save As → paste this path in the filename box:\n"
+        f"     {flag}\n"
+        "  3. Save empty file (choose All Files if needed)\n\n"
+        "  [bold]Option C — Skip CLI[/bold] (no admin): In Premiere after workflow:\n"
+        "  File → Scripts → Run Script File → automate_premiere.jsx\n"
     )
     return False
 
