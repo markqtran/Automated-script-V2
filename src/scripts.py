@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .gdrive import list_drive_files
-from .utils import normalize_path
+from .utils import normalize_path, sanitize_windows_folder_name
 
 console = Console()
 
@@ -49,6 +49,12 @@ def normalize_script_number(number: str) -> str:
     return digits.zfill(3)
 
 
+def build_project_folder_name(number: str, title: str) -> str:
+    """e.g. '[004] POV - Your friend is highkey a serial killer' (Windows-safe)."""
+    safe_title = sanitize_windows_folder_name(title)
+    return f"[{number}] {safe_title}"
+
+
 def parse_script_filename(filename: str) -> ScriptEntry | None:
     """Parse '[003] Teaching an Ipad Kid.pdf' into a ScriptEntry."""
     name = filename.strip()
@@ -57,7 +63,7 @@ def parse_script_filename(filename: str) -> ScriptEntry | None:
         return None
     number, title = match.group(1), match.group(2).strip()
     title = re.sub(r"\.pdf$", "", title, flags=re.IGNORECASE).strip()
-    folder_name = f"[{number}] {title}"
+    folder_name = build_project_folder_name(number, title)
     return ScriptEntry(
         number=number,
         title=title,
@@ -111,15 +117,17 @@ def _save_cache(scripts: dict[str, ScriptEntry]) -> None:
 
 
 def _cache_to_entries(data: dict[str, dict]) -> dict[str, ScriptEntry]:
-    return {
-        num: ScriptEntry(
-            number=v["number"],
-            title=v["title"],
-            folder_name=v["folder_name"],
+    entries: dict[str, ScriptEntry] = {}
+    for num, v in data.items():
+        number = v["number"]
+        title = v["title"]
+        entries[num] = ScriptEntry(
+            number=number,
+            title=title,
+            folder_name=build_project_folder_name(number, title),
             source_file=v["source_file"],
         )
-        for num, v in data.items()
-    }
+    return entries
 
 
 def get_scripts(cfg: dict, refresh: bool = False) -> dict[str, ScriptEntry]:

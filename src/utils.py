@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+# Characters invalid in Windows file/folder names (colon, etc.)
+_INVALID_WIN_NAME = re.compile(r'[<>:"/\\|?*]')
 
 
 @dataclass(frozen=True)
@@ -22,6 +26,20 @@ class FileInfo:
 
 def normalize_path(path: str | Path) -> Path:
     return Path(path).expanduser().resolve()
+
+
+def sanitize_windows_folder_name(text: str) -> str:
+    """
+    Make a script title safe for SSD/HDD project folders and .prproj names.
+
+    Drive PDFs may use ':' (e.g. 'POV: Your friend...') which Windows rejects.
+    """
+    cleaned = text.strip()
+    cleaned = cleaned.replace(":", " -")
+    cleaned = _INVALID_WIN_NAME.sub("-", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = cleaned.rstrip(". ")
+    return cleaned or "Untitled"
 
 
 def iter_files(root: Path, extensions: Iterable[str] | None = None) -> Iterable[Path]:
