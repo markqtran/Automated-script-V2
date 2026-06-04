@@ -120,7 +120,7 @@ def upload_to_drive(
         return result.returncode == 0
 
     # Upload Proxies only (Premiere creates Video/Proxies next to originals)
-    proxy_path = proxies_dir(local, cfg)
+    proxy_path = proxies_dir(cfg, local)
     proxy_name = proxies_folder_name(cfg)
     if proxy_path:
         ok = _run_rclone(proxy_path, f"{dest}/{proxy_name}")
