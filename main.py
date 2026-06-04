@@ -5,7 +5,8 @@ Footage workflow automation — daily ingest through final backup.
 Usage:
   python main.py new-project --number 003  # Create folders from [01] Scripts
   python main.py list-scripts             # Show all script numbers/titles
-  python main.py daily --number 003       # Ingest into the matching project folder
+  python main.py workflow --number 003       # Full pipeline: folders + ingest + Premiere script
+  python main.py watch-upload --number 003 # Wait for proxies, upload to Drive
   python main.py ingest             # Ingest without compare report
   python main.py proxies --folder   # Create FFmpeg proxies
   python main.py upload-drive       # Upload proxies + project to Google Drive
@@ -32,6 +33,8 @@ from src.proxies import create_proxies
 from src.project_paths import project_root
 from src.scripts import resolve_project_folder
 from src.sd_compare import compare_sd_cards_from_config, print_compare_report
+from src.watch_upload import watch_and_upload
+from src.workflow import run_full_workflow
 
 console = Console()
 
@@ -81,6 +84,58 @@ def cmd_new_project(
         refresh=refresh,
         dry_run=dry_run,
         open_premiere=open_premiere,
+    )
+
+
+@cli.command()
+@click.option("--number", "-n", required=True, help="3-digit script number (e.g. 003)")
+@click.option("--refresh", is_flag=True, help="Refresh script list from Google Drive")
+@click.option("--skip-ingest", is_flag=True, help="Skip SD card copy (folders + Premiere only)")
+@click.option("--no-premiere", is_flag=True, help="Do not launch Premiere")
+@click.option("--watch-upload", is_flag=True, help="After proxies finish, upload to Google Drive")
+@click.option("--dry-run", is_flag=True)
+@click.pass_context
+def workflow(
+    ctx: click.Context,
+    number: str,
+    refresh: bool,
+    skip_ingest: bool,
+    no_premiere: bool,
+    watch_upload: bool,
+    dry_run: bool,
+) -> None:
+    """
+    Full workflow matching your Premiere process:
+    [01] Scripts name -> SSD folder + Video/ -> SD ingest -> Premiere JSX -> optional Drive upload.
+    """
+    run_full_workflow(
+        ctx.obj["cfg"],
+        number,
+        refresh=refresh,
+        skip_ingest=skip_ingest,
+        open_premiere=not no_premiere,
+        watch_upload=watch_upload,
+        dry_run=dry_run,
+    )
+
+
+@cli.command("watch-upload")
+@click.option("--number", "-n", required=True, help="3-digit script number")
+@click.option("--timeout", default=180, help="Max minutes to wait for proxies")
+@click.option("--dry-run", is_flag=True)
+@click.pass_context
+def cmd_watch_upload(
+    ctx: click.Context,
+    number: str,
+    timeout: int,
+    dry_run: bool,
+) -> None:
+    """Wait until Video/Proxies is done, then upload Proxies + .prproj to Google Drive."""
+    watch_and_upload(
+        ctx.obj["cfg"],
+        number,
+        timeout_minutes=timeout,
+        dry_run=dry_run,
     )
 
 

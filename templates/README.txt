@@ -1,9 +1,18 @@
-# Place a blank Premiere project here for instant project creation.
-#
-# One-time setup:
-#   1. Open Adobe Premiere Pro
-#   2. File > New > Project
-#   3. Save As → templates/project_template.prproj (in this folder)
-#
-# After that, `python main.py new-project --number 003` copies this template
-# and opens Premiere with the project ready.
+# Premiere project template (IMPORTANT)
+
+Save ONE blank Premiere project here as: project_template.prproj
+
+Before saving, set these in Premiere:
+
+File > Project Settings > Ingest Settings:
+  - Ingest: ON
+  - Action: Create Proxies
+  - Preset: ProRes QuickTime Proxy
+  - Frame size: Quarter
+  - Watermark: Proxy Icon
+  - Location: Next to Original Media, in Proxy folder
+
+Also set scratch disks to your SSD (Soju).
+
+When the template exists, new-project copies it so proxy settings
+match your workflow every time.
