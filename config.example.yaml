@@ -25,6 +25,7 @@ scripts:
 
 # Google Drive — [04] Proxies/Project file (upload destination)
 # https://drive.google.com/drive/folders/1RWdJVs4LJKNMoDrRUTendfhD0uYy6VVl
+# upload-drive creates: [003] Script Title/Video/... + [003] Script Title.prproj
 google_drive:
   rclone_remote: "gdrive"
   folder_id: "1RWdJVs4LJKNMoDrRUTendfhD0uYy6VVl"

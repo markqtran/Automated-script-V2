@@ -52,7 +52,7 @@ def watch_and_upload(
     dry_run: bool = False,
 ) -> dict:
     """
-    Poll Video/Proxies until files stop changing, then upload Proxies + .prproj.
+    Poll Video/Proxies until files stop changing, then upload Video/ + .prproj.
     """
     folder_name = resolve_project_folder(cfg, number)
     ssd_path, _ = project_root(cfg, folder_name)

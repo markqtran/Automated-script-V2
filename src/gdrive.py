@@ -8,7 +8,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from .project_paths import find_prproj, proxies_dir, proxies_folder_name
+from .project_paths import find_prproj, video_folder_name
 from .utils import normalize_path
 
 console = Console()
@@ -82,9 +82,11 @@ def upload_to_drive(
     dry_run: bool = False,
 ) -> dict:
     """
-    Upload Proxies folder + .prproj to Google Drive (assistant editor handoff).
-    Looks for Video/Proxies/ (Premiere) or Proxies/ at project root.
-    Does not upload original camera files.
+    Upload Video/ (footage + Proxies) and .prproj to Google Drive [04].
+
+    Creates a Drive subfolder named like the SSD project folder, e.g.
+    [003] POV You're teaching an ipad kid/Video/... and [003] ....prproj
+    under google_drive.folder_id ([04] Proxies/Project file).
     """
     gdrive = cfg.get("google_drive", {})
     folder_id = gdrive.get("folder_id")
@@ -119,19 +121,19 @@ def upload_to_drive(
         result = subprocess.run(cmd)
         return result.returncode == 0
 
-    # Upload Proxies only (Premiere creates Video/Proxies next to originals)
-    proxy_path = proxies_dir(cfg, local)
-    proxy_name = proxies_folder_name(cfg)
-    if proxy_path:
-        ok = _run_rclone(proxy_path, f"{dest}/{proxy_name}")
+    # Upload entire Video/ tree (clips, .xml sidecars, Video/Proxies/, etc.)
+    video_name = video_folder_name(cfg)
+    video_path = local / video_name
+    if video_path.is_dir() and any(video_path.rglob("*")):
+        ok = _run_rclone(video_path, f"{dest}/{video_name}")
         stats["uploads" if ok else "errors"] += 1
     else:
-        video = cfg.get("project", {}).get("video_folder", "Video")
         console.print(
-            f"[yellow]No Proxies folder found.[/yellow]\n"
-            f"  Expected: {local / video / proxy_name} or {local / proxy_name}\n"
-            f"  Create proxies in Premiere first (right-click clips > Proxy > Create Proxies)."
+            f"[yellow]No Video folder to upload.[/yellow]\n"
+            f"  Expected: {video_path}\n"
+            f"  Run ingest first: python main.py daily --number ..."
         )
+        stats["errors"] += 1
 
     # Upload .prproj at project root only
     if project_file:
@@ -157,10 +159,10 @@ def upload_to_drive(
         if folder_id:
             link = f"https://drive.google.com/drive/folders/{folder_id}"
             console.print(
-                f"\n[green]Upload complete.[/green] Project: [001] style folder "
-                f"'{project_name}' in [04] Proxies/Project file"
+                f"\n[green]Upload complete.[/green] Drive folder: '{project_name}'"
             )
-            console.print(f"  Drive parent: {link}")
+            console.print(f"  Contents: {video_name}/ + .prproj")
+            console.print(f"  Open [04] and find: {link}")
         else:
             console.print(f"\n[green]Upload complete.[/green] Assistant editor folder: {dest}")
 

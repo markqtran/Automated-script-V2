@@ -9,7 +9,7 @@ Usage:
   python main.py watch-upload --number 003 # Wait for proxies, upload to Drive
   python main.py ingest             # Ingest without compare report
   python main.py proxies --folder   # Create FFmpeg proxies
-  python main.py upload-drive       # Upload proxies + project to Google Drive
+  python main.py upload-drive       # Upload Video/ + .prproj to Google Drive [04]
   python main.py audit-assets       # Find files not backed up on HDD
   python main.py mirror             # Mirror HDD1 to HDD2
   python main.py finalize           # Audit + copy missing + mirror
@@ -192,7 +192,7 @@ def cmd_watch_upload(
     timeout: int,
     dry_run: bool,
 ) -> None:
-    """Wait until Video/Proxies is done, then upload Proxies + .prproj to Google Drive."""
+    """Wait until Video/Proxies is done, then upload Video/ + .prproj to Google Drive."""
     watch_and_upload(
         ctx.obj["cfg"],
         number,
@@ -315,7 +315,7 @@ def cmd_upload_drive(
     project: str | None,
     dry_run: bool,
 ) -> None:
-    """Upload Video/Proxies folder and .prproj to Google Drive (not original footage)."""
+    """Upload Video/ folder and .prproj to Google Drive [04] (named like script folder)."""
     cfg = ctx.obj["cfg"]
     if number:
         name = resolve_project_folder(cfg, number)
