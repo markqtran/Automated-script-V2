@@ -143,22 +143,15 @@ def _jsx_path_for_extendscript(path: Path) -> str:
 
 
 def _write_temp_wrapper(jsx_path: Path) -> Path:
-    """
-    Wrapper in %TEMP% — required for project paths like F:\\[003] Title\\
-    (square brackets break Windows es.processFile if passed on the command line).
-    """
+    """Wrapper in %TEMP% avoids cmd-line issues with [brackets] in project folder names."""
     target_lit = json.dumps(_jsx_path_for_extendscript(jsx_path))
     content = f"""(function () {{
-    try {{
-        var f = new File({target_lit});
-        if (!f.exists) {{
-            alert("Automation script not found:\\n" + f.fsName);
-            return;
-        }}
-        $.evalFile(f);
-    }} catch (e) {{
-        alert("Premiere automation error:\\n" + e.toString());
+    var f = new File({target_lit});
+    if (!f.exists) {{
+        alert("Automation script not found:\\n" + f.fsName);
+        return;
     }}
+    $.evalFile(f);
 }})();
 """
     wrapper = Path(tempfile.gettempdir()) / "automated_script_premiere_run.jsx"
@@ -172,39 +165,37 @@ def write_launch_batch(
     jsx_path: Path,
 ) -> Path:
     """Batch file Ethan can double-click if Python launch does not run the script."""
-    wrapper = _write_temp_wrapper(jsx_path)
     bat = project_folder / "OPEN_PREMIERE_AUTOMATION.bat"
     prem = str(premiere_exe.resolve())
-    wrap = str(wrapper.resolve())
+    jsx = str(jsx_path.resolve())
     bat.write_text(
         "@echo off\n"
         "echo Closing Premiere if running...\n"
         'taskkill /IM "Adobe Premiere Pro.exe" /F >nul 2>&1\n'
-        "timeout /t 3 /nobreak >nul\n"
-        "echo Starting Premiere with automation (via temp wrapper)...\n"
-        f'start "" "{prem}" /C es.processFile "{wrap}"\n'
+        "timeout /t 2 /nobreak >nul\n"
+        "echo Starting Premiere with automation...\n"
+        f'start "" "{prem}" /C es.processFile "{jsx}"\n'
         "echo.\n"
-        "echo If nothing happens: File ^> Scripts ^> Run Script File ^> automate_premiere.jsx\n"
-        "echo Or: python main.py install-premiere\n"
+        "echo If nothing happens, run once as Administrator:\n"
+        "echo   python main.py install-premiere\n"
         "pause\n",
         encoding="utf-8",
     )
     return bat
 
 
-def _try_launch(premiere: Path, jsx_path: Path, cwd: Path) -> bool:
-    """Always launch via %TEMP% wrapper — never pass [003] paths on the CLI."""
-    wrapper = _write_temp_wrapper(jsx_path)
-    script = str(wrapper.resolve())
-    try:
-        subprocess.Popen(
-            [str(premiere), "/C", "es.processFile", script],
-            shell=False,
-            cwd=str(cwd),
-        )
-        return True
-    except OSError:
-        return False
+def _try_launch(premiere: Path, script_path: Path, cwd: Path) -> bool:
+    script = str(script_path.resolve())
+    for args in (
+        [str(premiere), "/C", "es.processFile", script],
+        [str(premiere), "/C", "es.process", f'$.evalFile(new File("{_jsx_path_for_extendscript(script_path)}"));'],
+    ):
+        try:
+            subprocess.Popen(args, shell=False, cwd=str(cwd))
+            return True
+        except OSError:
+            continue
+    return False
 
 
 def launch_premiere_automation(
@@ -241,9 +232,7 @@ def launch_premiere_automation(
         console.print(
             "[bold red]Premiere is already running.[/bold red] "
             "Quit Premiere completely (File → Exit), then run workflow again.\n"
-            "  CLI scripts only run on a fresh launch.\n"
-            "  Or in Premiere now: File → Scripts → Run Script File →\n"
-            f"    {jsx_path}\n"
+            "  CLI scripts only run when Premiere starts from the command line."
         )
         return False
 
@@ -261,13 +250,11 @@ def launch_premiere_automation(
     console.print("\n[bold]Launching Premiere with automation...[/bold]")
     console.print(f"  Project folder: {project_folder}")
     console.print(f"  Script:         {jsx_path.name}")
-    console.print(f"  Launcher:       {wrapper}")
-    console.print("  [dim]Uses temp launcher so project folders with brackets work.[/dim]")
     if flag_ok:
         console.print(f"  CLI scripting:  enabled ({flag_path.name})")
     console.print(f"  Backup launcher: {bat_path.name}  (double-click if Premiere opens empty)\n")
 
-    launched = _try_launch(premiere, jsx_path, project_folder)
+    launched = _try_launch(premiere, wrapper, project_folder)
 
     if not flag_ok:
         console.print(

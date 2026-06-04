@@ -56,15 +56,14 @@ def generate_premiere_setup_script(
         "preset": proxy_preset,
         "encode_preset": encode_preset,
         "proxy_sub": proxy_sub,
-        "auto_proxies_bool": "true" if do_proxies else "false",
+        "auto_proxies": "true" if do_proxies else "false",
     }
-    lit = {k: json.dumps(v) for k, v in literals.items() if k != "auto_proxies_bool"}
+    lit = {k: json.dumps(v) for k, v in literals.items()}
 
     return f"""// Auto-generated — Nathan Doan Productions
 // Proxy target: Quarter, ProRes QuickTime Proxy, Proxy Icon, Video/{proxy_sub}/
 
 (function () {{
-    try {{
     var PROJECT_PATH = {lit["prproj"]};
     var VIDEO_DIR = {lit["video"]};
     var PROXIES_DIR = {lit["proxies"]};
@@ -74,24 +73,14 @@ def generate_premiere_setup_script(
     var PROXY_PRESET_PATH = {lit["preset"]};
     var ENCODE_PRESET_PATH = {lit["encode_preset"]};
     var PROXY_SUBFOLDER = {lit["proxy_sub"]};
-    var AUTO_CREATE_PROXIES = {literals["auto_proxies_bool"]};
+    var AUTO_CREATE_PROXIES = {lit["auto_proxies"]} === "true";
 
+    var FOOTAGE_EXT = /\\.(mp4|mov|mxf|avi|mkv|r3d|braw|m4v)$/i;
     var proxyJobs = {{}};
     var batchStarted = false;
 
     function alertMsg(msg) {{
         try {{ alert(msg); }} catch (e) {{ $.writeln(msg); }}
-    }}
-
-    function isFootageFile(name) {{
-        var dot = name.lastIndexOf(".");
-        if (dot < 0) return false;
-        var ext = name.substring(dot + 1).toLowerCase();
-        var allowed = ["mp4", "mov", "mxf", "avi", "mkv", "r3d", "braw", "m4v"];
-        for (var a = 0; a < allowed.length; a++) {{
-            if (ext === allowed[a]) return true;
-        }}
-        return false;
     }}
 
     function pathSep() {{
@@ -119,7 +108,7 @@ def generate_premiere_setup_script(
         for (var i = 0; i < items.length; i++) {{
             if (items[i] instanceof Folder) {{
                 collectMediaFiles(items[i], list);
-            }} else if (items[i] instanceof File && isFootageFile(items[i].name)) {{
+            }} else if (items[i] instanceof File && FOOTAGE_EXT.test(items[i].name)) {{
                 list.push(items[i].fsName);
             }}
         }}
@@ -149,33 +138,13 @@ def generate_premiere_setup_script(
         }}
     }}
 
-    function ensureProxiesDir() {{
-        var dir = new Folder(PROXIES_DIR);
-        if (!dir.exists) dir.create();
-        return dir;
-    }}
-
-    // Always write proxies on the SSD project: PROJECT_ROOT/Video/Proxies/
     function proxyOutputPath(mediaPath) {{
-        var proxiesRoot = ensureProxiesDir();
+        var proxiesRoot = new Folder(PROXIES_DIR);
+        if (!proxiesRoot.exists) proxiesRoot.create();
         var src = new File(mediaPath);
         var dot = src.name.lastIndexOf(".");
         var base = dot > 0 ? src.name.substring(0, dot) : src.name;
-
-        var normMedia = mediaPath.replace(/\\\\/g, "/").toLowerCase();
-        var normVideo = VIDEO_DIR.replace(/\\\\/g, "/").toLowerCase();
-        var outFolder = proxiesRoot;
-
-        if (normMedia.indexOf(normVideo) === 0) {{
-            var rel = mediaPath.substring(VIDEO_DIR.length).replace(/^[\\\\/]+/, "");
-            var slash = Math.max(rel.lastIndexOf("/"), rel.lastIndexOf("\\\\"));
-            if (slash > 0) {{
-                var sub = rel.substring(0, slash);
-                outFolder = new Folder(proxiesRoot.fsName + pathSep() + sub);
-                if (!outFolder.exists) outFolder.create();
-            }}
-        }}
-        return outFolder.fsName + pathSep() + base + "_Proxy.mov";
+        return proxiesRoot.fsName + pathSep() + base + "_Proxy.mov";
     }}
 
     function resolvePresetPath(configured, fallbackConfigured) {{
@@ -228,14 +197,12 @@ def generate_premiere_setup_script(
             if (app.encoder.launchEncoder) app.encoder.launchEncoder();
         }} catch (launchErr) {{}}
 
-        ensureProxiesDir();
-
         var queued = 0;
         var workArea = 0;
         var removeOnComplete = 0;
         var encPreset = encodePreset || ingestPreset;
 
-        // Explicit output on SSD (Video/Proxies) — do this FIRST so AME has a destination
+        // Explicit AME output on SSD: PROJECT_ROOT/Video/Proxies/
         for (var c = 0; c < clips.length; c++) {{
             var clip = clips[c];
             if (clip.hasProxy && clip.hasProxy()) continue;
@@ -264,7 +231,6 @@ def generate_premiere_setup_script(
             return queued;
         }}
 
-        // Fallback: Premiere Create Proxies API (destination comes from ingest preset only)
         for (var p = 0; p < clips.length; p++) {{
             var it = clips[p];
             if (it.hasProxy && it.hasProxy()) continue;
@@ -349,7 +315,6 @@ def generate_premiere_setup_script(
             proxyMsg =
                 "Create Proxies started for " + queued + " clip(s).\\n" +
                 "Output folder (SSD):\\n" + PROXIES_DIR + "\\n" +
-                "(Next to originals in Video/" + PROXY_SUBFOLDER + "/)\\n" +
                 "Watch progress in Media Encoder.\\n\\n";
         }} else if (!ingestPreset && !encodePreset) {{
             proxyMsg =
@@ -379,9 +344,6 @@ def generate_premiere_setup_script(
         "When proxies finish:\\n" +
         "python main.py upload-drive --number " + (SCRIPT_NUMBER || "XXX")
     );
-    }} catch (err) {{
-        alertMsg("automate_premiere.jsx failed:\\n" + err.toString());
-    }}
 }})();
 """
 

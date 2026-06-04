@@ -97,33 +97,6 @@ def cmd_list_proxy_presets(ctx: click.Context) -> None:
     )
 
 
-@cli.command("run-premiere")
-@click.option("--number", "-n", required=True, help="3-digit script number")
-@click.pass_context
-def cmd_run_premiere(ctx: click.Context, number: str) -> None:
-    """Re-run automate_premiere.jsx (close Premiere first, or use File > Scripts)."""
-    from src.premiere_launch import launch_premiere_automation
-    from src.premiere_jsx import write_premiere_setup_script
-    from src.scripts import get_script_by_number
-
-    cfg = ctx.obj["cfg"]
-    entry = get_script_by_number(cfg, number)
-    ssd_path, _ = project_root(cfg, entry.folder_name)
-    prproj_path = ssd_path / f"{entry.folder_name}.prproj"
-    jsx_path = write_premiere_setup_script(
-        cfg, ssd_path, entry.folder_name, prproj_path, script_number=entry.number
-    )
-    console.print(f"[bold]Script updated:[/bold] {jsx_path}")
-    ok = launch_premiere_automation(
-        cfg, jsx_path=jsx_path, prproj_path=prproj_path, project_folder=ssd_path
-    )
-    if not ok:
-        console.print(
-            "\n[yellow]Manual:[/yellow] In Premiere: File → Scripts → Run Script File →\n"
-            f"  {jsx_path}"
-        )
-
-
 @cli.command("install-premiere")
 @click.pass_context
 def cmd_install_premiere(ctx: click.Context) -> None:
