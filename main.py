@@ -64,6 +64,19 @@ def cmd_list_scripts(ctx: click.Context, refresh: bool) -> None:
     list_available_scripts(ctx.obj["cfg"], refresh=refresh)
 
 
+@cli.command("install-premiere")
+@click.pass_context
+def cmd_install_premiere(ctx: click.Context) -> None:
+    """
+    One-time: enable Premiere to run automate_premiere.jsx on launch.
+    Creates extendscriptprqe.txt next to Adobe Premiere Pro.exe (may need Administrator).
+    """
+    from src.premiere_launch import install_premiere_cli_scripting
+
+    ok = install_premiere_cli_scripting(ctx.obj["cfg"])
+    raise SystemExit(0 if ok else 1)
+
+
 @cli.command("new-project")
 @click.option("--number", "-n", required=True, help="3-digit script number (e.g. 003)")
 @click.option("--refresh", is_flag=True, help="Refresh script list from Google Drive")
