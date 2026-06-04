@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .premiere_proxy import auto_create_proxies, proxy_subfolder_name, resolve_proxy_preset_path
+from .premiere_proxy import (
+    auto_create_proxies,
+    proxy_subfolder_name,
+    resolve_encode_preset_path,
+    resolve_proxy_preset_path,
+)
 from .project_paths import video_folder_name
 
 
@@ -34,6 +39,7 @@ def generate_premiere_setup_script(
     project_root_jsx = _jsx_path(project_root)
     script_num = script_number or ""
     proxy_preset = resolve_proxy_preset_path(cfg)
+    encode_preset = resolve_encode_preset_path(cfg) or proxy_preset
     proxy_sub = proxy_subfolder_name(cfg)
     do_proxies = auto_create_proxies(cfg)
 
@@ -44,6 +50,7 @@ def generate_premiere_setup_script(
         "folder": folder_name,
         "script": script_num,
         "preset": proxy_preset,
+        "encode_preset": encode_preset,
         "proxy_sub": proxy_sub,
         "auto_proxies": "true" if do_proxies else "false",
     }
@@ -59,6 +66,7 @@ def generate_premiere_setup_script(
     var FOLDER_NAME = {lit["folder"]};
     var SCRIPT_NUMBER = {lit["script"]};
     var PROXY_PRESET_PATH = {lit["preset"]};
+    var ENCODE_PRESET_PATH = {lit["encode_preset"]};
     var PROXY_SUBFOLDER = {lit["proxy_sub"]};
     var AUTO_CREATE_PROXIES = {lit["auto_proxies"]} === "true";
 
@@ -101,6 +109,13 @@ def generate_premiere_setup_script(
         }}
     }}
 
+    function isUnderVideoDir(mediaPath) {{
+        if (!mediaPath) return false;
+        var norm = mediaPath.replace(/\\\\/g, "/").toLowerCase();
+        var video = VIDEO_DIR.replace(/\\\\/g, "/").toLowerCase();
+        return norm.indexOf(video) >= 0;
+    }}
+
     function collectClipItems(bin, clips) {{
         if (!bin || !bin.children) return;
         for (var i = 0; i < bin.children.numItems; i++) {{
@@ -111,7 +126,7 @@ def generate_premiere_setup_script(
             }}
             if (child.getMediaPath) {{
                 var mp = child.getMediaPath();
-                if (mp && mp.length > 0 && child.canProxy && child.canProxy()) {{
+                if (mp && mp.length > 0 && isUnderVideoDir(mp) && child.canProxy && child.canProxy()) {{
                     clips.push(child);
                 }}
             }}
@@ -128,40 +143,14 @@ def generate_premiere_setup_script(
         return proxyDir.fsName + pathSep() + base + "_Proxy.mov";
     }}
 
-    function findPresetInFolder(folder, matches) {{
-        if (!folder || !folder.exists) return "";
-        var files = folder.getFiles("*.epr", true);
-        for (var i = 0; i < files.length; i++) {{
-            var n = files[i].name.toLowerCase();
-            if (n.indexOf("prores") >= 0 && n.indexOf("proxy") >= 0) {{
-                return files[i].fsName;
-            }}
-            if (n.indexOf("proxy") >= 0 && n.indexOf("ingest") >= 0) {{
-                return files[i].fsName;
-            }}
-        }}
-        return "";
-    }}
-
-    function resolveProxyPreset() {{
-        if (PROXY_PRESET_PATH && PROXY_PRESET_PATH.length > 0) {{
-            var f = new File(PROXY_PRESET_PATH);
+    function resolvePresetPath(configured, fallbackConfigured) {{
+        if (configured && configured.length > 0) {{
+            var f = new File(configured);
             if (f.exists) return f.fsName;
         }}
-        var bundled = new File(PROJECT_ROOT + pathSep() + "NDP_Proxy_Ingest.epr");
-        if (bundled.exists) return bundled.fsName;
-
-        var userHome = Folder.userData.fsName;
-        var ameRoot = new Folder(userHome + pathSep() + "Adobe");
-        if (ameRoot.exists) {{
-            var ameChildren = ameRoot.getFiles();
-            for (var a = 0; a < ameChildren.length; a++) {{
-                if (ameChildren[a] instanceof Folder && ameChildren[a].name.indexOf("Media Encoder") >= 0) {{
-                    var presets = new Folder(ameChildren[a].fsName + pathSep() + "Presets");
-                    var hit = findPresetInFolder(presets, null);
-                    if (hit) return hit;
-                }}
-            }}
+        if (fallbackConfigured && fallbackConfigured.length > 0) {{
+            var g = new File(fallbackConfigured);
+            if (g.exists) return g.fsName;
         }}
         return "";
     }}
@@ -189,8 +178,10 @@ def generate_premiere_setup_script(
         }}
     }}
 
-    function queueProxiesForClips(clips, presetPath) {{
-        if (!app.encoder || !presetPath || clips.length === 0) return 0;
+    function queueProxiesForClips(clips, ingestPreset, encodePreset) {{
+        if (!app.encoder || clips.length === 0) return 0;
+        var preset = ingestPreset || encodePreset;
+        if (!preset) return 0;
 
         try {{
             app.encoder.bind("onEncoderJobComplete", onProxyJobComplete);
@@ -198,43 +189,67 @@ def generate_premiere_setup_script(
             app.encoder.bind("onEncoderJobQueued", onProxyJobQueued);
         }} catch (bindErr) {{}}
 
+        try {{
+            if (app.encoder.launchEncoder) app.encoder.launchEncoder();
+        }} catch (launchErr) {{}}
+
         var queued = 0;
         var workArea = 0;
         var removeOnComplete = 0;
+        var encPreset = encodePreset || ingestPreset;
+
+        // Premiere 2024+ — same as Proxy > Create Proxies (uses ingest preset)
+        for (var p = 0; p < clips.length; p++) {{
+            var it = clips[p];
+            if (it.hasProxy && it.hasProxy()) continue;
+            if (it.createProxy) {{
+                try {{
+                    if (it.createProxy(ingestPreset || preset)) {{
+                        queued++;
+                    }}
+                }} catch (cpItemErr) {{}}
+            }}
+        }}
+        if (queued > 0) {{
+            try {{ app.encoder.startBatch(); }} catch (sbErr) {{}}
+            return queued;
+        }}
 
         try {{
-            if (app.encoder.createProxyJob && AUTO_CREATE_PROXIES) {{
-                var job = app.encoder.createProxyJob(clips, presetPath);
-                if (job) {{
-                    if (app.encoder.launchEncoder) app.encoder.launchEncoder();
-                    if (app.encoder.startBatch) app.encoder.startBatch();
+            if (app.encoder.createProxyJob) {{
+                var proxyJob = app.encoder.createProxyJob(clips, ingestPreset || preset);
+                if (proxyJob) {{
+                    try {{ app.encoder.startBatch(); }} catch (sb2Err) {{}}
                     return clips.length;
                 }}
             }}
-        }} catch (cpErr) {{}}
+        }} catch (cpJobErr) {{}}
 
         for (var c = 0; c < clips.length; c++) {{
             var clip = clips[c];
             if (clip.hasProxy && clip.hasProxy()) continue;
             var mediaPath = clip.getMediaPath();
-            if (!mediaPath) continue;
+            if (!mediaPath || !isUnderVideoDir(mediaPath)) continue;
             var outPath = proxyOutputPath(mediaPath);
+            var jobID = 0;
             try {{
-                var jobID = app.encoder.encodeProjectItem(
-                    clip, outPath, presetPath, workArea, removeOnComplete
+                jobID = app.encoder.encodeProjectItem(
+                    clip, outPath, encPreset, workArea, removeOnComplete
                 );
-                if (jobID && jobID !== "0" && jobID !== 0) {{
-                    proxyJobs[jobID] = clip;
-                    queued++;
-                }}
-            }} catch (encErr) {{}}
+            }} catch (epiErr) {{}}
+            if (!jobID || jobID === "0" || jobID === 0) {{
+                try {{
+                    jobID = app.encoder.encodeFile(mediaPath, outPath, encPreset, workArea, removeOnComplete);
+                }} catch (efErr) {{}}
+            }}
+            if (jobID && jobID !== "0" && jobID !== 0) {{
+                proxyJobs[jobID] = clip;
+                queued++;
+            }}
         }}
 
         if (queued > 0) {{
-            try {{
-                if (app.encoder.launchEncoder) app.encoder.launchEncoder();
-                if (!batchStarted && app.encoder.startBatch) app.encoder.startBatch();
-            }} catch (launchErr) {{}}
+            try {{ app.encoder.startBatch(); }} catch (sb3Err) {{}}
         }}
         return queued;
     }}
@@ -285,30 +300,36 @@ def generate_premiere_setup_script(
         var clips = [];
         collectClipItems(app.project.rootItem, clips);
 
-        var presetPath = resolveProxyPreset();
+        var ingestPreset = resolvePresetPath(PROXY_PRESET_PATH, "");
+        var encodePreset = resolvePresetPath(ENCODE_PRESET_PATH, PROXY_PRESET_PATH);
         var queued = 0;
-        if (presetPath) {{
-            queued = queueProxiesForClips(clips, presetPath);
+        if (ingestPreset || encodePreset) {{
+            queued = queueProxiesForClips(clips, ingestPreset, encodePreset);
         }}
 
         if (queued > 0) {{
             proxyMsg =
-                "Proxy jobs queued: " + queued + " clip(s).\\n" +
-                "Preset: ProRes QuickTime Proxy (Quarter in ingest template)\\n" +
-                "Output: next to originals in " + PROXY_SUBFOLDER + " folder\\n" +
-                "Media Encoder is processing.\\n\\n";
-        }} else if (!presetPath) {{
+                "Create Proxies started for " + queued + " clip(s) in Video/.\\n" +
+                "Settings: Quarter, ProRes QuickTime Proxy, Proxy Icon\\n" +
+                "Output: " + PROXY_SUBFOLDER + " folder next to each clip\\n" +
+                "Watch progress in Media Encoder.\\n\\n";
+        }} else if (!ingestPreset && !encodePreset) {{
             proxyMsg =
-                "No proxy .epr preset found.\\n\\n" +
-                "ONE-TIME SETUP:\\n" +
-                "1. In Media Encoder: Preset Browser > + > Create Ingest Preset\\n" +
-                "   - Create Proxies, ProRes QuickTime Proxy, Quarter, Proxy Icon\\n" +
-                "   - Location: Next to Original Media, in Proxy folder\\n" +
-                "2. Export/save as templates/NDP_Proxy_Ingest.epr\\n" +
-                "   OR set premiere.proxy_ingest_preset in config.yaml\\n\\n" +
-                "OR save templates/project_template.prproj with Ingest settings, re-run workflow.\\n\\n";
+                "Could not find proxy preset (.epr). Media Encoder opened with no jobs.\\n\\n" +
+                "ONE-TIME (5 min) — match your Create Proxies settings:\\n" +
+                "1. Media Encoder > + > Create Ingest Preset\\n" +
+                "   Create Proxies | ProRes QuickTime Proxy | Quarter | Proxy Icon\\n" +
+                "   Next to Original Media, in Proxy folder\\n" +
+                "2. Right-click preset > Reveal Preset File\\n" +
+                "3. Copy to: templates\\\\NDP_Proxy_Ingest.epr\\n" +
+                "4. python main.py list-proxy-presets\\n" +
+                "5. Re-run workflow\\n\\n" +
+                "Until then: select all clips in Project panel >\\n" +
+                "Right-click > Proxy > Create Proxies (same settings).\\n\\n";
         }} else {{
-            proxyMsg = "Clips imported. If proxies did not start, use File > Scripts > Run Script File again.\\n\\n";
+            proxyMsg =
+                "Preset found but no jobs queued. Select all clips in Video/, then run\\n" +
+                "automate_premiere.jsx again, or Create Proxies manually.\\n\\n";
         }}
     }}
 

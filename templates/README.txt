@@ -17,16 +17,26 @@ Also set scratch disks to your SSD (Soju).
 When the template exists, new-project copies it so proxy settings
 match your workflow every time.
 
-# Proxy ingest preset (for full automation)
+# Proxy ingest preset (REQUIRED for auto Create Proxies + Media Encoder)
 
-Export an Ingest Preset from Adobe Media Encoder with the SAME settings as above:
+This must match: Right-click clips > Proxy > Create Proxies
+  Frame size: Quarter
+  Preset: ProRes QuickTime Proxy
+  Watermark: Proxy Icon
+  Location: Next to Original Media, in Proxy folder
 
-1. Media Encoder > Preset Browser > + > Create Ingest Preset
-2. Create Proxies, ProRes QuickTime Proxy, Quarter, Proxy Icon
-3. Location: Next to Original Media, in Proxy folder
-4. Save as: templates/NDP_Proxy_Ingest.epr
+Steps (one time per PC):
+1. Open Adobe Media Encoder
+2. Preset Browser > + > Create Ingest Preset
+3. Turn ON: Transcode / Create Proxies (same options as above)
+4. Right-click the new preset > Reveal Preset File
+5. Copy that .epr file to this folder as:
+   templates/NDP_Proxy_Ingest.epr
 
-The script uses this .epr file to queue proxy jobs for every clip in Video/.
+Test:
+  python main.py list-proxy-presets
+
+Without this file, Premiere opens but Media Encoder has no jobs.
 
 # Automatic Premiere (required one-time on each PC)
 

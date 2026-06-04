@@ -64,6 +64,39 @@ def cmd_list_scripts(ctx: click.Context, refresh: bool) -> None:
     list_available_scripts(ctx.obj["cfg"], refresh=refresh)
 
 
+@cli.command("list-proxy-presets")
+@click.pass_context
+def cmd_list_proxy_presets(ctx: click.Context) -> None:
+    """List .epr presets on this PC (for proxy automation setup)."""
+    from src.premiere_proxy import (
+        list_discovered_presets,
+        resolve_encode_preset_path,
+        resolve_proxy_preset_path,
+    )
+
+    cfg = ctx.obj["cfg"]
+    console.print("\n[bold]Configured proxy presets[/bold]")
+    console.print(f"  Ingest: {resolve_proxy_preset_path(cfg) or '(not set)'}")
+    console.print(f"  Encode: {resolve_encode_preset_path(cfg) or '(not set)'}")
+
+    rows = list_discovered_presets()
+    if not rows:
+        console.print("\n[yellow]No .epr files found under Adobe folders.[/yellow]")
+        console.print("  Create an Ingest Preset in Media Encoder, then copy it to:")
+        console.print("  templates/NDP_Proxy_Ingest.epr")
+        return
+
+    console.print(f"\n[bold]Found {len(rows)} .epr file(s) on this PC[/bold] (higher score = better match)\n")
+    for label, path in rows[:40]:
+        console.print(f"  [{label}] {path}")
+    if len(rows) > 40:
+        console.print(f"  ... and {len(rows) - 40} more")
+    console.print(
+        "\n[dim]Copy your ingest preset to templates/NDP_Proxy_Ingest.epr "
+        "or set premiere.proxy_ingest_preset in config.yaml[/dim]\n"
+    )
+
+
 @cli.command("install-premiere")
 @click.pass_context
 def cmd_install_premiere(ctx: click.Context) -> None:
