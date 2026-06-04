@@ -51,6 +51,7 @@ proxies:
 footage_extensions:
   - ".mp4"
   - ".mov"
+  - ".xml"   # Sony sidecar metadata next to clips in CLIP/
   - ".mxf"
   - ".avi"
   - ".mkv"
