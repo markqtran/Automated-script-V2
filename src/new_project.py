@@ -14,6 +14,8 @@ from rich.console import Console
 from .project_paths import project_root, video_dir, video_folder_name
 from .scripts import get_script_by_number, get_scripts, print_scripts_table
 
+console = Console()
+
 
 def _find_premiere_exe(cfg: dict) -> Path | None:
     premiere_cfg = cfg.get("premiere", {})
