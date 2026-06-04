@@ -11,6 +11,7 @@ from rich.console import Console
 from .premiere_jsx import write_premiere_setup_script
 from .premiere_launch import launch_premiere_automation
 from .project_paths import project_root, video_folder_name
+from .premiere_proxy import proxy_subfolder_name
 from .scripts import get_script_by_number, get_scripts, print_scripts_table
 
 console = Console()
@@ -127,6 +128,9 @@ def setup_new_project(
     hdd_path.mkdir(parents=True, exist_ok=True)
     (ssd_path / video_name).mkdir(exist_ok=True)
     (hdd_path / video_name).mkdir(exist_ok=True)
+    proxy_name = proxy_subfolder_name(cfg)
+    (ssd_path / video_name / proxy_name).mkdir(exist_ok=True)
+    (hdd_path / video_name / proxy_name).mkdir(exist_ok=True)
     _write_project_meta(ssd_path, entry)
     prproj_path = _create_premiere_project(
         cfg, ssd_path, entry.folder_name, dry_run=False, script_number=entry.number
@@ -135,6 +139,7 @@ def setup_new_project(
     console.print(f"\n[green]Project folders created.[/green]")
     console.print(f"  SSD (Soju): {ssd_path}")
     console.print(f"  Video:      {ssd_path / video_name}/")
+    console.print(f"  Proxies:    {ssd_path / video_name / proxy_name}/")
     console.print(f"  HDD backup: {hdd_path}")
 
     jsx_path = ssd_path / "automate_premiere.jsx"

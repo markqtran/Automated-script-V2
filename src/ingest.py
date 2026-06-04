@@ -9,6 +9,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
+from .premiere_proxy import proxy_subfolder_name
 from .project_paths import project_root, video_dir, video_folder_name
 from .sd_compare import CompareResult, compare_sd_cards_from_config
 from .utils import format_bytes, normalize_path, sha256_file
@@ -104,6 +105,11 @@ def ingest_footage(
     files = compare.all_unique_files
     ssd_root, hdd_root = _dest_paths(cfg, shoot_date)
     video_name = video_folder_name(cfg)
+    proxy_name = proxy_subfolder_name(cfg)
+    ssd_root.mkdir(parents=True, exist_ok=True)
+    hdd_root.mkdir(parents=True, exist_ok=True)
+    (ssd_root / proxy_name).mkdir(exist_ok=True)
+    (hdd_root / proxy_name).mkdir(exist_ok=True)
 
     to_copy: list[tuple[str, Path, str]] = []
     skipped_outside_clip = 0

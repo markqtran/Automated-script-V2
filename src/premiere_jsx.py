@@ -33,8 +33,11 @@ def generate_premiere_setup_script(
     - Import all clips under Video/
     - Create proxies (Quarter / ProRes QT Proxy / Proxies subfolder) when preset available
     """
-    video_dir = project_root / video_folder_name(cfg)
+    video_name = video_folder_name(cfg)
+    video_dir = project_root / video_name
+    proxies_dir = video_dir / proxy_subfolder_name(cfg)
     video_jsx = _jsx_path(video_dir)
+    proxies_jsx = _jsx_path(proxies_dir)
     prproj_jsx = _jsx_path(prproj_path)
     project_root_jsx = _jsx_path(project_root)
     script_num = script_number or ""
@@ -46,6 +49,7 @@ def generate_premiere_setup_script(
     literals = {
         "prproj": prproj_jsx,
         "video": video_jsx,
+        "proxies": proxies_jsx,
         "root": project_root_jsx,
         "folder": folder_name,
         "script": script_num,
@@ -62,6 +66,7 @@ def generate_premiere_setup_script(
 (function () {{
     var PROJECT_PATH = {lit["prproj"]};
     var VIDEO_DIR = {lit["video"]};
+    var PROXIES_DIR = {lit["proxies"]};
     var PROJECT_ROOT = {lit["root"]};
     var FOLDER_NAME = {lit["folder"]};
     var SCRIPT_NUMBER = {lit["script"]};
@@ -133,14 +138,33 @@ def generate_premiere_setup_script(
         }}
     }}
 
+    function ensureProxiesDir() {{
+        var dir = new Folder(PROXIES_DIR);
+        if (!dir.exists) dir.create();
+        return dir;
+    }}
+
+    // Always write proxies on the SSD project: PROJECT_ROOT/Video/Proxies/
     function proxyOutputPath(mediaPath) {{
+        var proxiesRoot = ensureProxiesDir();
         var src = new File(mediaPath);
-        var parent = src.parent;
-        var proxyDir = new Folder(parent.fsName + pathSep() + PROXY_SUBFOLDER);
-        if (!proxyDir.exists) proxyDir.create();
         var dot = src.name.lastIndexOf(".");
         var base = dot > 0 ? src.name.substring(0, dot) : src.name;
-        return proxyDir.fsName + pathSep() + base + "_Proxy.mov";
+
+        var normMedia = mediaPath.replace(/\\\\/g, "/").toLowerCase();
+        var normVideo = VIDEO_DIR.replace(/\\\\/g, "/").toLowerCase();
+        var outFolder = proxiesRoot;
+
+        if (normMedia.indexOf(normVideo) === 0) {{
+            var rel = mediaPath.substring(VIDEO_DIR.length).replace(/^[\\\\/]+/, "");
+            var slash = Math.max(rel.lastIndexOf("/"), rel.lastIndexOf("\\\\"));
+            if (slash > 0) {{
+                var sub = rel.substring(0, slash);
+                outFolder = new Folder(proxiesRoot.fsName + pathSep() + sub);
+                if (!outFolder.exists) outFolder.create();
+            }}
+        }}
+        return outFolder.fsName + pathSep() + base + "_Proxy.mov";
     }}
 
     function resolvePresetPath(configured, fallbackConfigured) {{
@@ -193,38 +217,14 @@ def generate_premiere_setup_script(
             if (app.encoder.launchEncoder) app.encoder.launchEncoder();
         }} catch (launchErr) {{}}
 
+        ensureProxiesDir();
+
         var queued = 0;
         var workArea = 0;
         var removeOnComplete = 0;
         var encPreset = encodePreset || ingestPreset;
 
-        // Premiere 2024+ — same as Proxy > Create Proxies (uses ingest preset)
-        for (var p = 0; p < clips.length; p++) {{
-            var it = clips[p];
-            if (it.hasProxy && it.hasProxy()) continue;
-            if (it.createProxy) {{
-                try {{
-                    if (it.createProxy(ingestPreset || preset)) {{
-                        queued++;
-                    }}
-                }} catch (cpItemErr) {{}}
-            }}
-        }}
-        if (queued > 0) {{
-            try {{ app.encoder.startBatch(); }} catch (sbErr) {{}}
-            return queued;
-        }}
-
-        try {{
-            if (app.encoder.createProxyJob) {{
-                var proxyJob = app.encoder.createProxyJob(clips, ingestPreset || preset);
-                if (proxyJob) {{
-                    try {{ app.encoder.startBatch(); }} catch (sb2Err) {{}}
-                    return clips.length;
-                }}
-            }}
-        }} catch (cpJobErr) {{}}
-
+        // Explicit output on SSD (Video/Proxies) — do this FIRST so AME has a destination
         for (var c = 0; c < clips.length; c++) {{
             var clip = clips[c];
             if (clip.hasProxy && clip.hasProxy()) continue;
@@ -250,8 +250,35 @@ def generate_premiere_setup_script(
 
         if (queued > 0) {{
             try {{ app.encoder.startBatch(); }} catch (sb3Err) {{}}
+            return queued;
         }}
-        return queued;
+
+        // Fallback: Premiere Create Proxies API (destination comes from ingest preset only)
+        for (var p = 0; p < clips.length; p++) {{
+            var it = clips[p];
+            if (it.hasProxy && it.hasProxy()) continue;
+            if (it.createProxy) {{
+                try {{
+                    if (it.createProxy(ingestPreset || preset)) queued++;
+                }} catch (cpItemErr) {{}}
+            }}
+        }}
+        if (queued > 0) {{
+            try {{ app.encoder.startBatch(); }} catch (sbErr) {{}}
+            return queued;
+        }}
+
+        try {{
+            if (app.encoder.createProxyJob) {{
+                var proxyJob = app.encoder.createProxyJob(clips, ingestPreset || preset);
+                if (proxyJob) {{
+                    try {{ app.encoder.startBatch(); }} catch (sb2Err) {{}}
+                    return clips.length;
+                }}
+            }}
+        }} catch (cpJobErr) {{}}
+
+        return 0;
     }}
 
     // --- 1. Project on SSD ---
@@ -309,9 +336,9 @@ def generate_premiere_setup_script(
 
         if (queued > 0) {{
             proxyMsg =
-                "Create Proxies started for " + queued + " clip(s) in Video/.\\n" +
-                "Settings: Quarter, ProRes QuickTime Proxy, Proxy Icon\\n" +
-                "Output: " + PROXY_SUBFOLDER + " folder next to each clip\\n" +
+                "Create Proxies started for " + queued + " clip(s).\\n" +
+                "Output folder (SSD):\\n" + PROXIES_DIR + "\\n" +
+                "(Next to originals in Video/" + PROXY_SUBFOLDER + "/)\\n" +
                 "Watch progress in Media Encoder.\\n\\n";
         }} else if (!ingestPreset && !encodePreset) {{
             proxyMsg =
