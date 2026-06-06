@@ -266,10 +266,8 @@ def generate_premiere_setup_script(
     }}
     app.project.save();
 
-    // --- 2. Enable ingest proxies (uses settings saved in project_template.prproj) ---
-    if (AUTO_CREATE_PROXIES) {{
-        try {{ app.project.setEnableTranscodeOnIngest(true); }} catch (ingestErr) {{}}
-    }}
+    // --- 2. Ingest OFF — proxies are queued via Media Encoder encodeFile below ---
+    try {{ app.project.setEnableTranscodeOnIngest(false); }} catch (ingestErr) {{}}
 
     // --- 3. Import all video in Video/ ---
     var videoFolder = new Folder(VIDEO_DIR);

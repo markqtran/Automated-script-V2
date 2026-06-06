@@ -2,17 +2,13 @@
 
 Save ONE blank Premiere project here as: project_template.prproj
 
-Before saving, set these in Premiere:
+Before saving, set scratch disks to your SSD (Soju).
 
-File > Project Settings > Ingest Settings:
-  - Ingest: ON
-  - Action: Create Proxies
-  - Preset: ProRes QuickTime Proxy
-  - Frame size: Quarter
-  - Watermark: Proxy Icon
-  - Location: Next to Original Media, in Proxy folder
+Optional — Ingest can stay OFF. The Python workflow queues proxies via
+Media Encoder (templates/NDP_Proxy_Encode.epr), not Premiere Ingest.
 
-Also set scratch disks to your SSD (Soju).
+If you turn Ingest ON in the template, use a preset that exists on every PC
+or the project will show "Missing Preset" on re-open.
 
 When the template exists, new-project copies it so proxy settings
 match your workflow every time.

@@ -59,6 +59,9 @@ def _create_premiere_project(
     if TEMPLATE_PATH.exists():
         shutil.copy2(TEMPLATE_PATH, prproj_path)
         console.print(f"  Created project from template: {prproj_path.name}")
+        from .prproj_ingest import disable_premiere_ingest_settings
+
+        disable_premiere_ingest_settings(prproj_path)
     else:
         console.print(
             "[yellow]No templates/project_template.prproj found.[/yellow]\n"

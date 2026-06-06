@@ -96,6 +96,11 @@ def run_full_workflow(
     )
     console.print(f"\n[bold]Premiere automation:[/bold] {jsx_path}")
 
+    from .prproj_ingest import disable_premiere_ingest_settings
+
+    if prproj_path.is_file():
+        disable_premiere_ingest_settings(prproj_path)
+
     if open_premiere:
         launch_premiere_automation(
             cfg,
