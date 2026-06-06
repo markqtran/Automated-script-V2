@@ -156,6 +156,7 @@ def prepare_pickup_run(cfg: dict, folder_name: str) -> PickupRun:
     console.print(f"  Footage → {shots}/")
     console.print(f"  Proxies (during encode) → {working_proxies}/")
     console.print(f"  After encode → {final_proxies}/")
+    console.print(f"  Premiere:    re-opens same {folder_name}.prproj (does not create a new project)")
     return run
 
 

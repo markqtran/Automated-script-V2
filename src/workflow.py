@@ -93,10 +93,18 @@ def run_full_workflow(
         import_dir=import_dir,
         proxies_dir_override=proxies_override,
         import_label=import_label,
+        continue_existing_project=pickup_run is not None,
     )
     console.print(f"\n[bold]Premiere automation:[/bold] {jsx_path}")
 
     from .prproj_ingest import disable_premiere_ingest_settings
+
+    if pickup_run and not prproj_path.is_file():
+        console.print(
+            f"\n[red]Missing project file for pick-up run:[/red] {prproj_path}\n"
+            "  Complete a first workflow for this script, save the .prproj on the SSD, then re-run."
+        )
+        raise SystemExit(1)
 
     if prproj_path.is_file():
         disable_premiere_ingest_settings(prproj_path)
@@ -108,11 +116,17 @@ def run_full_workflow(
             prproj_path=prproj_path,
             project_folder=ssd_path,
         )
-        target = import_label or "Video"
-        console.print(
-            f"\n[dim]Premiere should open project [bold]{folder_name}[/bold], "
-            f"import {target}/, and queue proxies.[/dim]"
-        )
+        if pickup_run:
+            console.print(
+                f"\n[dim]Premiere will [bold]re-open[/bold] {prproj_path.name}, "
+                f"import new clips from {import_label}/, save, and queue proxies.[/dim]"
+            )
+        else:
+            target = import_label or "Video"
+            console.print(
+                f"\n[dim]Premiere should open project [bold]{folder_name}[/bold], "
+                f"import {target}/, and queue proxies.[/dim]"
+            )
         console.print("[dim]Close Premiere first if it was already running.[/dim]")
 
     console.print("\n[bold]Proxy settings (save in project template once):[/bold]")

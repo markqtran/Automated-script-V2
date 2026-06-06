@@ -28,6 +28,7 @@ def generate_premiere_setup_script(
     import_dir: Path | None = None,
     proxies_dir_override: Path | None = None,
     import_label: str = "",
+    continue_existing_project: bool = False,
 ) -> str:
     """
     JSX run inside Premiere (auto via /C es.processFile or File > Scripts):
@@ -62,6 +63,7 @@ def generate_premiere_setup_script(
         "proxy_sub": proxy_sub,
         "auto_proxies": "true" if do_proxies else "false",
         "import_label": import_display,
+        "continue_project": "true" if continue_existing_project else "false",
     }
     lit = {k: json.dumps(v) for k, v in literals.items()}
 
@@ -80,6 +82,7 @@ def generate_premiere_setup_script(
     var PROXY_SUBFOLDER = {lit["proxy_sub"]};
     var AUTO_CREATE_PROXIES = {lit["auto_proxies"]} === "true";
     var IMPORT_LABEL = {lit["import_label"]};
+    var CONTINUE_PROJECT = {lit["continue_project"]} === "true";
 
     var FOOTAGE_EXT = /\\.(mp4|mov|mxf|avi|mkv|r3d|braw|m4v)$/i;
     var proxyJobs = {{}};
@@ -252,13 +255,25 @@ def generate_premiere_setup_script(
         return queued;
     }}
 
-    // --- 1. Project on SSD ---
+    // --- 1. Project on SSD (pick-up runs always reopen the same .prproj) ---
     setScratchDisks(PROJECT_ROOT);
 
     var prprojFile = new File(PROJECT_PATH);
-    var opened = prprojFile.exists
-        ? app.openDocument(PROJECT_PATH, 1, 1, 1, 1)
-        : app.newProject(PROJECT_PATH);
+    var opened = false;
+
+    if (CONTINUE_PROJECT && !prprojFile.exists) {{
+        alertMsg(
+            "Pick-up run needs the existing Premiere project:\\n" + PROJECT_PATH + "\\n\\n" +
+            "Save the project from the first shoot, then re-run workflow."
+        );
+        return;
+    }}
+
+    if (prprojFile.exists) {{
+        opened = app.openDocument(PROJECT_PATH, 1, 1, 1, 1);
+    }} else {{
+        opened = app.newProject(PROJECT_PATH);
+    }}
 
     if (!opened) {{
         alertMsg("Could not create/open project:\\n" + PROJECT_PATH);
@@ -324,7 +339,14 @@ def generate_premiere_setup_script(
         }}
     }}
 
+    app.project.save();
+
+    var projectAction = CONTINUE_PROJECT
+        ? "Continued existing project (pick-up). Saved.\\n\\n"
+        : "";
+
     alertMsg(
+        projectAction +
         "Project: " + FOLDER_NAME + "\\n" +
         "Location: " + PROJECT_ROOT + "\\n" +
         "Imported " + mediaPaths.length + " clip(s) from " + IMPORT_LABEL + "/.\\n\\n" +
@@ -347,6 +369,7 @@ def write_premiere_setup_script(
     import_dir: Path | None = None,
     proxies_dir_override: Path | None = None,
     import_label: str = "",
+    continue_existing_project: bool = False,
 ) -> Path:
     jsx_path = project_root / "automate_premiere.jsx"
     jsx_path.write_text(
@@ -359,6 +382,7 @@ def write_premiere_setup_script(
             import_dir=import_dir,
             proxies_dir_override=proxies_dir_override,
             import_label=import_label,
+            continue_existing_project=continue_existing_project,
         ),
         encoding="utf-8",
     )
