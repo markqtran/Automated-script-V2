@@ -89,7 +89,7 @@ def upload_to_drive(
     Upload Proxies folder + .prproj to Google Drive (assistant editor handoff).
 
     Primary run: Video/Proxies/ → Drive .../Proxies/
-    Pick-up run: Pick Up Shots #N/Proxies/ → Drive .../Pickup Proxies/Proxies/
+    Pick-up run: Pick Up Shots #N/Proxies/ → Drive .../Pickup Proxies #N/Proxies/
     """
     gdrive = cfg.get("google_drive", {})
     folder_id = gdrive.get("folder_id")

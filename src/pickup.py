@@ -34,9 +34,13 @@ def pickup_shots_folder_name(n: int) -> str:
     return f"Pick Up Shots #{n}"
 
 
-def pickup_drive_upload_subpath(cfg: dict) -> str:
-    """Google Drive path under script folder: Pickup Proxies/Proxies/"""
-    return f"{PICKUP_DRIVE_ROOT}/{proxy_subfolder_name(cfg)}"
+def pickup_drive_root_name(n: int) -> str:
+    return f"{PICKUP_DRIVE_ROOT} #{n}"
+
+
+def pickup_drive_upload_subpath(cfg: dict, pickup_number: int) -> str:
+    """Google Drive path under script folder: Pickup Proxies #N/Proxies/"""
+    return f"{pickup_drive_root_name(pickup_number)}/{proxy_subfolder_name(cfg)}"
 
 
 def _folder_has_footage(path: Path, extensions: list[str]) -> bool:
@@ -127,7 +131,7 @@ def prompt_pickup_run(cfg: dict, folder_name: str) -> bool:
         f"Proxies stay at [bold]{shots}/{proxy_sub}/[/bold] on SSD + HDD backup."
     )
     console.print(
-        f"Google Drive: [bold]{pickup_drive_upload_subpath(cfg)}/[/bold]\n"
+        f"Google Drive: [bold]{pickup_drive_upload_subpath(cfg, n)}/[/bold]\n"
     )
     return confirm("Start pick-up shots run?", default=True)
 
@@ -154,7 +158,7 @@ def prepare_pickup_run(cfg: dict, folder_name: str) -> PickupRun:
     console.print(f"\n[green]Pick-up run #{n} ready.[/green]")
     console.print(f"  Footage → {shots}/")
     console.print(f"  Proxies → {working_proxies}/  (SSD + HDD backup)")
-    console.print(f"  Drive   → {pickup_drive_upload_subpath(cfg)}/")
+    console.print(f"  Drive   → {pickup_drive_upload_subpath(cfg, n)}/")
     console.print(f"  Premiere: re-opens same {folder_name}.prproj")
     return run
 

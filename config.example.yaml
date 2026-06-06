@@ -42,7 +42,7 @@ premiere:
 
 # Pick-up shots — re-run workflow for same script number (see src/pickup.py)
 pickup:
-  drive_root: "Pickup Proxies"   # on Google Drive: Pickup Proxies/Proxies/
+  drive_root: "Pickup Proxies #"   # on Google Drive: Pickup Proxies #1/Proxies/, #2/, ...
   # HDD + SSD keep Proxies inside Pick Up Shots #N/ (same as first-run folder name)
 
 # Project folder layout (matches Premiere workflow)

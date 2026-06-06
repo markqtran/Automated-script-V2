@@ -143,7 +143,7 @@ def run_full_workflow(
             console.print(
                 f"  (Pick-up #{pickup_run.number} → "
                 f"{pickup_run.working_proxies_folder}/ on HDD, "
-                f"Pickup Proxies/Proxies/ on Drive)"
+                f"Pickup Proxies #{pickup_run.number}/Proxies/ on Drive)"
             )
         console.print(f"  Or: python main.py workflow --number {number} --wait-backup")
         console.print(f"  Drive: python main.py watch-upload --number {number}")

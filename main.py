@@ -387,7 +387,7 @@ def cmd_upload_drive(
     upload_kwargs: dict = {}
     if pickup:
         upload_kwargs["proxies_path"] = pickup_proxies_path(ssd_path, pickup)
-        upload_kwargs["proxies_drive_subpath"] = pickup_drive_upload_subpath(cfg)
+        upload_kwargs["proxies_drive_subpath"] = pickup_drive_upload_subpath(cfg, pickup.number)
     upload_to_drive(
         folder,
         cfg,

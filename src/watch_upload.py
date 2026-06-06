@@ -116,7 +116,7 @@ def _post_proxy_handoff(
         upload_kwargs: dict = {}
         if pickup:
             upload_kwargs["proxies_path"] = pickup_proxies_path(ssd_path, pickup)
-            upload_kwargs["proxies_drive_subpath"] = pickup_drive_upload_subpath(cfg)
+            upload_kwargs["proxies_drive_subpath"] = pickup_drive_upload_subpath(cfg, pickup.number)
         result["upload"] = upload_to_drive(
             ssd_path,
             cfg,
