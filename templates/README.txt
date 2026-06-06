@@ -43,15 +43,14 @@ PowerShell (as Administrator if normal user fails):
   python main.py install-premiere
 
 That creates extendscriptprqe.txt next to Adobe Premiere Pro.exe.
-Premiere and Media Encoder may stay open.
+Premiere and Media Encoder may stay open (Media Encoder is fine).
 
-If Premiere is already open, workflow queues the script — then in Premiere:
-  File → Scripts → Run Automated Workflow
+If Premiere is already open, workflow closes and reopens it automatically so the script runs.
+Save any open projects first. To skip auto-close, set premiere.restart_if_open: false in config.yaml
+and use File → Scripts → Run Automated Workflow after workflow.
 
-(One-time: python main.py install-premiere installs that menu item.)
-
-Close Premiere completely only if cold-start automation does not run, then:
-  python main.py workflow --number 003
+One-time setup:
+  python main.py install-premiere
 
 If Premiere opens but does nothing, double-click in the project folder:
   OPEN_PREMIERE_AUTOMATION.bat

@@ -128,7 +128,7 @@ def run_full_workflow(
                 f"import {target}/, and queue proxies.[/dim]"
             )
         console.print(
-            "[dim]If Premiere was already open: File → Scripts → Run Automated Workflow[/dim]"
+            "[dim]Premiere reopens automatically when already running (save open projects first).[/dim]"
         )
 
     console.print("\n[bold]Proxy settings (save in project template once):[/bold]")

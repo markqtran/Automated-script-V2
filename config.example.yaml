@@ -34,7 +34,8 @@ google_drive:
 # Adobe Premiere Pro (optional — auto-detected from Program Files if empty)
 premiere:
   exe_path: ""
-  auto_run_script: true   # Auto on cold start; if Premiere open use File → Scripts → Run Automated Workflow
+  auto_run_script: true   # Launch Premiere and run automate_premiere.jsx automatically
+  restart_if_open: true   # Close + reopen Premiere if already running (Adobe CLI limitation)
   auto_create_proxies: true
   # REQUIRED for auto proxies — see templates/README.txt:
   proxy_encode_preset: ""   # templates/NDP_Proxy_Encode.epr (Media Encoder export preset)

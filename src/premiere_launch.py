@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from rich.console import Console
@@ -196,8 +197,9 @@ def install_premiere_cli_scripting(cfg: dict) -> bool:
     if ok:
         console.print(
             "\n[green]Premiere automation is ready.[/green]\n"
-            "  Cold start: python main.py workflow --number 003\n"
-            "  Premiere already open: workflow queues the script — then in Premiere:\n"
+            "  Run: python main.py workflow --number 003\n"
+            "  If Premiere is already open it closes and reopens automatically.\n"
+            "  Optional (keep Premiere open): set premiere.restart_if_open: false, then\n"
             f"    File → Scripts → {HELPER_SCRIPT_NAME}\n"
         )
         return True
@@ -239,9 +241,25 @@ def _write_launch_wrapper(jsx_path: Path) -> Path:
     return wrapper
 
 
-def _extendscript_cli_command(script_path: Path) -> str:
-    """Single /C argument Adobe expects: es.processFile("C:/path/script.jsx")."""
-    return f'es.processFile("{_jsx_path_for_extendscript(script_path)}")'
+def _restart_premiere() -> bool:
+    """Quit Premiere so CLI es.processFile can run on the next launch."""
+    if not is_premiere_running():
+        return True
+    console.print("[dim]Closing Premiere so automation can run...[/dim]")
+    try:
+        subprocess.run(
+            ["taskkill", "/IM", "Adobe Premiere Pro.exe", "/F"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    for _ in range(20):
+        if not is_premiere_running():
+            return True
+        time.sleep(0.5)
+    return not is_premiere_running()
 
 
 def write_launch_batch(
@@ -253,14 +271,14 @@ def write_launch_batch(
     bat = project_folder / "OPEN_PREMIERE_AUTOMATION.bat"
     prem = str(premiere_exe.resolve())
     wrapper = _write_launch_wrapper(jsx_path)
-    cli = _extendscript_cli_command(wrapper)
+    jsx = str(wrapper.resolve())
     bat.write_text(
         "@echo off\n"
+        "echo Closing Premiere if running...\n"
+        'taskkill /IM "Adobe Premiere Pro.exe" /F >nul 2>&1\n'
+        "timeout /t 2 /nobreak >nul\n"
         "echo Starting Premiere with automation...\n"
-        f'start "" "{prem}" /C {cli}\n'
-        "echo.\n"
-        "echo If Premiere was already open, use instead:\n"
-        f"echo   File - Scripts - {HELPER_SCRIPT_NAME}\n"
+        f'start "" "{prem}" /C es.processFile "{jsx}"\n'
         "echo.\n"
         "echo If nothing happens, run once as Administrator:\n"
         "echo   python main.py install-premiere\n"
@@ -271,13 +289,12 @@ def write_launch_batch(
 
 
 def _try_launch(premiere: Path, script_path: Path, cwd: Path) -> bool:
-    """Launch Premiere cold and run ExtendScript (Premiere must not already be open)."""
-    command = _extendscript_cli_command(script_path)
-    attempts = (
-        [str(premiere), "/C", command],
-        [str(premiere), f"/C {command}"],
-    )
-    for args in attempts:
+    """Launch Premiere cold and run ExtendScript via es.processFile."""
+    script = str(script_path.resolve())
+    for args in (
+        [str(premiere), "/C", "es.processFile", script],
+        [str(premiere), "/C", "es.process", f'$.evalFile(new File("{_jsx_path_for_extendscript(script_path)}"));'],
+    ):
         try:
             subprocess.Popen(args, shell=False, cwd=str(cwd))
             return True
@@ -287,21 +304,42 @@ def _try_launch(premiere: Path, script_path: Path, cwd: Path) -> bool:
 
 
 def _queue_for_open_premiere(jsx_path: Path) -> bool:
-    """Premiere is live — queue script and use File → Scripts (CLI cannot attach)."""
+    """Fallback when restart_if_open is false — run from Premiere Scripts menu."""
     write_script_queue(jsx_path)
     helper = ensure_premiere_scripts_helper()
     console.print(
-        "\n[bold yellow]Premiere is already open[/bold yellow] — one quick step in Premiere:\n"
+        "\n[bold yellow]Premiere is already open[/bold yellow] — run this in Premiere:\n"
         f"  [bold]File → Scripts → {HELPER_SCRIPT_NAME}[/bold]\n"
-        "  (Adobe cannot run CLI scripts into an open session — this avoids the "
-        "'file path does not exist' error.)\n"
     )
     if helper:
         console.print(f"  Helper: {helper}\n")
     else:
         console.print(
             f"  Or: File → Scripts → Run Script File → {jsx_path.name}\n"
+            "  Run once: python main.py install-premiere\n"
         )
+    return True
+
+
+def _prepare_premiere_for_cli(cfg: dict, premiere_open: bool) -> bool:
+    """
+    es.processFile only runs on a fresh Premiere launch.
+    Default: auto-close Premiere so the user does not have to quit manually.
+    """
+    premiere_cfg = cfg.get("premiere", {})
+    if not premiere_open:
+        return True
+    if premiere_cfg.get("restart_if_open") is False:
+        return False
+    console.print(
+        "[dim]Premiere is open — closing it automatically so the script can run "
+        "(save any open projects first).[/dim]"
+    )
+    if not _restart_premiere():
+        console.print(
+            "[red]Could not close Premiere.[/red] Quit Premiere manually, then re-run workflow."
+        )
+        return False
     return True
 
 
@@ -316,7 +354,8 @@ def launch_premiere_automation(
     Run automate_premiere.jsx.
 
     - Premiere closed: launch with /C es.processFile (automatic).
-    - Premiere open: queue script + run File → Scripts → Run Automated Workflow.
+    - Premiere open: closes Premiere automatically, then launches (default).
+      Set premiere.restart_if_open: false to queue for File → Scripts instead.
     """
     premiere_cfg = cfg.get("premiere", {})
     if premiere_cfg.get("auto_run_script") is False:
@@ -358,7 +397,10 @@ def launch_premiere_automation(
     if ame_open:
         console.print("[dim]Media Encoder is open — proxy jobs will queue there.[/dim]")
 
-    if premiere_open:
+    if premiere_open and not _prepare_premiere_for_cli(cfg, premiere_open):
+        return False
+
+    if premiere_open and cfg.get("premiere", {}).get("restart_if_open") is False:
         return _queue_for_open_premiere(jsx_path)
 
     console.print("\n[bold]Launching Premiere with automation...[/bold]")
