@@ -25,19 +25,23 @@ def generate_premiere_setup_script(
     prproj_path: Path,
     *,
     script_number: str = "",
+    import_dir: Path | None = None,
+    proxies_dir_override: Path | None = None,
+    import_label: str = "",
 ) -> str:
     """
     JSX run inside Premiere (auto via /C es.processFile or File > Scripts):
     - Scratch disks -> SSD project folder
     - Create/open project named like the folder
-    - Import all clips under Video/
-    - Create proxies (Quarter / ProRes QT Proxy / Proxies subfolder) when preset available
+    - Import all clips under import_dir (Video/ or Pick Up Shots #N/)
+    - Create proxies when preset available
     """
     video_name = video_folder_name(cfg)
-    video_dir = project_root / video_name
-    proxies_dir = video_dir / proxy_subfolder_name(cfg)
-    video_jsx = _jsx_path(video_dir)
-    proxies_jsx = _jsx_path(proxies_dir)
+    video_dir_path = import_dir or (project_root / video_name)
+    proxies_dir_path = proxies_dir_override or (video_dir_path / proxy_subfolder_name(cfg))
+    import_display = import_label or video_dir_path.name
+    video_jsx = _jsx_path(video_dir_path)
+    proxies_jsx = _jsx_path(proxies_dir_path)
     prproj_jsx = _jsx_path(prproj_path)
     project_root_jsx = _jsx_path(project_root)
     script_num = script_number or ""
@@ -57,6 +61,7 @@ def generate_premiere_setup_script(
         "encode_preset": encode_preset,
         "proxy_sub": proxy_sub,
         "auto_proxies": "true" if do_proxies else "false",
+        "import_label": import_display,
     }
     lit = {k: json.dumps(v) for k, v in literals.items()}
 
@@ -74,6 +79,7 @@ def generate_premiere_setup_script(
     var ENCODE_PRESET_PATH = {lit["encode_preset"]};
     var PROXY_SUBFOLDER = {lit["proxy_sub"]};
     var AUTO_CREATE_PROXIES = {lit["auto_proxies"]} === "true";
+    var IMPORT_LABEL = {lit["import_label"]};
 
     var FOOTAGE_EXT = /\\.(mp4|mov|mxf|avi|mkv|r3d|braw|m4v)$/i;
     var proxyJobs = {{}};
@@ -323,7 +329,7 @@ def generate_premiere_setup_script(
     alertMsg(
         "Project: " + FOLDER_NAME + "\\n" +
         "Location: " + PROJECT_ROOT + "\\n" +
-        "Imported " + mediaPaths.length + " clip(s) from Video/.\\n\\n" +
+        "Imported " + mediaPaths.length + " clip(s) from " + IMPORT_LABEL + "/.\\n\\n" +
         proxyMsg +
         "When proxies finish:\\n" +
         "HDD backup: python main.py watch-backup --number " + (SCRIPT_NUMBER || "XXX") + "\\n" +
@@ -340,6 +346,9 @@ def write_premiere_setup_script(
     prproj_path: Path,
     *,
     script_number: str = "",
+    import_dir: Path | None = None,
+    proxies_dir_override: Path | None = None,
+    import_label: str = "",
 ) -> Path:
     jsx_path = project_root / "automate_premiere.jsx"
     jsx_path.write_text(
@@ -349,6 +358,9 @@ def write_premiere_setup_script(
             folder_name,
             prproj_path,
             script_number=script_number,
+            import_dir=import_dir,
+            proxies_dir_override=proxies_dir_override,
+            import_label=import_label,
         ),
         encoding="utf-8",
     )

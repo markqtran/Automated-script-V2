@@ -17,11 +17,25 @@ from .utils import format_bytes, normalize_path, sha256_file
 console = Console()
 
 
+def _ingest_roots(
+    cfg: dict,
+    folder_name: str | None,
+    *,
+    pickup_subfolder: str | None = None,
+) -> tuple[Path, Path]:
+    """SSD/HDD ingest targets for primary Video/ or pick-up subfolder."""
+    if folder_name and pickup_subfolder:
+        ssd_proj, hdd_proj = project_root(cfg, folder_name)
+        return ssd_proj / pickup_subfolder, hdd_proj / pickup_subfolder
+
+    date_fmt = cfg["ingest"].get("date_folder_format", "%Y-%m-%d")
+    folder = folder_name or datetime.now().strftime(date_fmt)
+    return video_dir(cfg, folder, destination="ssd"), video_dir(cfg, folder, destination="hdd")
+
+
 def _dest_paths(cfg: dict, shoot_date: str | None = None) -> tuple[Path, Path]:
     """SSD/HDD ingest targets: project folder / Video / (camera paths)."""
-    date_fmt = cfg["ingest"].get("date_folder_format", "%Y-%m-%d")
-    folder = shoot_date or datetime.now().strftime(date_fmt)
-    return video_dir(cfg, folder, destination="ssd"), video_dir(cfg, folder, destination="hdd")
+    return _ingest_roots(cfg, shoot_date)
 
 
 def _video_dest_relative(rel: str, cfg: dict) -> str | None:
@@ -90,11 +104,13 @@ def ingest_footage(
     cfg: dict,
     compare: CompareResult | None = None,
     shoot_date: str | None = None,
+    *,
+    pickup_subfolder: str | None = None,
     dry_run: bool = False,
 ) -> dict:
     """
     Copy all footage from SD card(s) into project/Video/ on SSD and HDD.
-    Uses compare result to gather files from both cards when they differ.
+    When pickup_subfolder is set (e.g. 'Pick Up Shots #1'), ingest there instead.
     """
     extensions = cfg.get("footage_extensions", [".mp4", ".mov"])
     verify = cfg.get("ingest", {}).get("verify_checksum", True)
@@ -103,9 +119,14 @@ def ingest_footage(
         compare = compare_sd_cards_from_config(cfg, extensions)
 
     files = compare.all_unique_files
-    ssd_root, hdd_root = _dest_paths(cfg, shoot_date)
+    ssd_root, hdd_root = _ingest_roots(
+        cfg,
+        shoot_date,
+        pickup_subfolder=pickup_subfolder,
+    )
     video_name = video_folder_name(cfg)
     proxy_name = proxy_subfolder_name(cfg)
+    ingest_label = pickup_subfolder or video_name
     ssd_root.mkdir(parents=True, exist_ok=True)
     hdd_root.mkdir(parents=True, exist_ok=True)
     (ssd_root / proxy_name).mkdir(exist_ok=True)
@@ -122,7 +143,7 @@ def ingest_footage(
 
     stats = {"copied_ssd": 0, "copied_hdd": 0, "skipped": 0, "failed": 0, "bytes": 0}
 
-    console.print(f"\n[bold]Ingesting {len(to_copy)} file(s) into {video_name}/[/bold]")
+    console.print(f"\n[bold]Ingesting {len(to_copy)} file(s) into {ingest_label}/[/bold]")
     console.print("  (CLIP contents only — no PRIVATE/M4ROOT/CLIP folders on SSD)")
     console.print(f"  SSD: {ssd_root}")
     console.print(f"  HDD: {hdd_root}\n")

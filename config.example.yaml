@@ -40,6 +40,11 @@ premiere:
   proxy_encode_preset: ""   # templates/NDP_Proxy_Encode.epr (Media Encoder export preset)
   proxy_ingest_preset: ""   # optional; manual Create Proxies only
 
+# Pick-up shots — re-run workflow for same script number (see src/pickup.py)
+pickup:
+  shots_prefix: "Pick Up Shots #"      # e.g. Pick Up Shots #1
+  proxies_folder: "Pickup Proxies"     # renamed after encode; #2+ adds #N
+
 # Project folder layout (matches Premiere workflow)
 project:
   video_folder: "Video"           # SD footage copied here; import this folder in Premiere

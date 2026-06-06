@@ -8,7 +8,14 @@ from pathlib import Path
 from rich.console import Console
 
 from .gdrive import upload_to_drive
-from .project_paths import find_prproj, proxies_dir, project_root
+from .pickup import (
+    finalize_pickup_proxies,
+    load_pickup_run,
+    mark_pickup_complete,
+    pickup_final_proxies_path,
+    resolve_proxy_watch_path,
+)
+from .project_paths import find_prproj, project_root
 from .proxy_backup import backup_proxies_to_hdd
 from .scripts import resolve_project_folder
 
@@ -58,18 +65,21 @@ def wait_for_proxies(
     timeout_minutes: int = 180,
     stable_seconds: int = 30,
 ) -> tuple[str, Path] | None:
-    """Block until SSD Video/Proxies has stable proxy files. Returns folder_name, ssd_path."""
+    """Block until SSD proxies are stable. Returns folder_name, ssd_path."""
     folder_name = resolve_project_folder(cfg, number)
     ssd_path, _ = project_root(cfg, folder_name)
-    proxy_path = proxies_dir(cfg, ssd_path)
+    proxy_path = resolve_proxy_watch_path(cfg, folder_name)
+    pickup = load_pickup_run(ssd_path)
 
     console.print(f"\n[bold]Waiting for proxies on SSD[/bold] — {folder_name}")
     console.print(f"  Project: {ssd_path}")
-    console.print(f"  Watching: {proxy_path or (ssd_path / 'Video' / 'Proxies')}\n")
+    if pickup:
+        console.print(f"  Pick-up run #{pickup.number}: {pickup.shots_folder}")
+    console.print(f"  Watching: {proxy_path}\n")
 
     deadline = time.time() + timeout_minutes * 60
     while time.time() < deadline:
-        proxy_path = proxies_dir(cfg, ssd_path)
+        proxy_path = resolve_proxy_watch_path(cfg, folder_name)
         if proxy_path and _proxy_files_ready(proxy_path):
             console.print(f"[green]Proxies found:[/green] {proxy_path}")
             if _folder_stable(proxy_path, stable_seconds):
@@ -84,6 +94,52 @@ def wait_for_proxies(
     return None
 
 
+def _post_proxy_handoff(
+    cfg: dict,
+    folder_name: str,
+    ssd_path: Path,
+    *,
+    dry_run: bool,
+    upload: bool,
+) -> dict:
+    pickup = load_pickup_run(ssd_path)
+    if pickup:
+        if not dry_run:
+            finalize_pickup_proxies(cfg, folder_name, pickup)
+
+    backup_stats = backup_proxies_to_hdd(cfg, folder_name, dry_run=dry_run)
+
+    result: dict = {"backup": backup_stats}
+    if dry_run:
+        console.print("[yellow]Dry run — would upload to Drive next.[/yellow]" if upload else "")
+        result["success"] = True
+        result["dry_run"] = True
+        return result
+
+    if upload:
+        upload_kwargs: dict = {}
+        if pickup:
+            final = pickup_final_proxies_path(ssd_path, pickup)
+            upload_kwargs["proxies_path"] = final
+            upload_kwargs["proxies_upload_name"] = pickup.final_proxies_folder
+        result["upload"] = upload_to_drive(
+            ssd_path,
+            cfg,
+            project_file=find_prproj(cfg, ssd_path),
+            dry_run=False,
+            **upload_kwargs,
+        )
+
+    if pickup and not dry_run:
+        mark_pickup_complete(ssd_path)
+
+    ok = backup_stats.get("copied", 0) > 0 or backup_stats.get("skipped", 0) > 0
+    if pickup and pickup_final_proxies_path(ssd_path, pickup).exists():
+        ok = True
+    result["success"] = ok
+    return result
+
+
 def watch_and_backup_hdd(
     cfg: dict,
     number: str,
@@ -92,17 +148,15 @@ def watch_and_backup_hdd(
     stable_seconds: int = 30,
     dry_run: bool = False,
 ) -> dict:
-    """Wait for SSD proxies, then copy Video/Proxies → HDD backup."""
+    """Wait for SSD proxies, finalize pick-up rename, copy to HDD."""
     waited = wait_for_proxies(
         cfg, number, timeout_minutes=timeout_minutes, stable_seconds=stable_seconds
     )
     if not waited:
         return {"success": False, "reason": "timeout"}
 
-    folder_name, _ = waited
-    backup_stats = backup_proxies_to_hdd(cfg, folder_name, dry_run=dry_run)
-    ok = backup_stats.get("copied", 0) > 0 or backup_stats.get("skipped", 0) > 0
-    return {"success": ok, "backup": backup_stats}
+    folder_name, ssd_path = waited
+    return _post_proxy_handoff(cfg, folder_name, ssd_path, dry_run=dry_run, upload=False)
 
 
 def watch_and_upload(
@@ -113,7 +167,7 @@ def watch_and_upload(
     stable_seconds: int = 30,
     dry_run: bool = False,
 ) -> dict:
-    """Wait for proxies, copy SSD → HDD, then upload Proxies + .prproj to Drive."""
+    """Wait for proxies, HDD backup, then upload to Drive."""
     waited = wait_for_proxies(
         cfg, number, timeout_minutes=timeout_minutes, stable_seconds=stable_seconds
     )
@@ -121,13 +175,4 @@ def watch_and_upload(
         return {"success": False, "reason": "timeout"}
 
     folder_name, ssd_path = waited
-    backup_stats = backup_proxies_to_hdd(cfg, folder_name, dry_run=dry_run)
-
-    if dry_run:
-        console.print("[yellow]Dry run — would upload to Drive next.[/yellow]")
-        return {"success": True, "dry_run": True, "backup": backup_stats}
-
-    upload_stats = upload_to_drive(
-        ssd_path, cfg, project_file=find_prproj(cfg, ssd_path), dry_run=False
-    )
-    return {"success": True, "backup": backup_stats, "upload": upload_stats}
+    return _post_proxy_handoff(cfg, folder_name, ssd_path, dry_run=dry_run, upload=True)

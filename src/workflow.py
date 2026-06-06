@@ -6,10 +6,12 @@ from rich.console import Console
 
 from .ingest import ingest_footage
 from .new_project import setup_new_project
+from .pickup import detect_primary_run_exists, prepare_pickup_run, prompt_pickup_run
 from .premiere_jsx import write_premiere_setup_script
 from .premiere_launch import launch_premiere_automation
-from .project_paths import project_root, video_folder_name
-from .scripts import get_script_by_number, resolve_project_folder
+from .premiere_proxy import proxy_subfolder_name
+from .project_paths import project_root
+from .scripts import get_script_by_number
 from .sd_compare import compare_sd_cards_from_config, print_compare_report
 from .watch_upload import watch_and_backup_hdd, watch_and_upload
 
@@ -28,43 +30,69 @@ def run_full_workflow(
     dry_run: bool = False,
 ) -> None:
     """
-    1. Create [###] folder from [01] Scripts on Google Drive
-    2. Create Video/ on SSD + HDD
-    3. Copy SD card (PRIVATE/M4ROOT/CLIP...) into Video/
-    4. Write automate_premiere.jsx + open Premiere
-    5. Optionally wait for proxies → copy Video/Proxies SSD → HDD
-    6. Optionally upload to Drive
+    1. Create [###] folder from [01] Scripts (or pick-up subfolder on re-run)
+    2. Ingest SD -> Video/ (first run) or Pick Up Shots #N/ (re-run)
+    3. Premiere JSX + optional launch
+    4. Optionally wait for proxies, rename pick-up Proxies, HDD backup, Drive upload
     """
     entry = get_script_by_number(cfg, number, refresh=refresh)
     folder_name = entry.folder_name
+    pickup_run = None
 
     console.print(f"\n[bold]Full workflow — [{entry.number}] {entry.title}[/bold]\n")
 
-    # Step 1 — project folders on SSD
-    setup_new_project(
-        cfg,
-        number,
-        refresh=False,
-        dry_run=dry_run,
-        open_premiere=False,
-    )
-    if dry_run:
-        return
+    ssd_path, hdd_path = project_root(cfg, folder_name)
+
+    if detect_primary_run_exists(cfg, folder_name):
+        if not prompt_pickup_run(cfg, folder_name):
+            raise SystemExit(0)
+        pickup_run = prepare_pickup_run(cfg, folder_name)
+        ssd_path.mkdir(parents=True, exist_ok=True)
+        hdd_path.mkdir(parents=True, exist_ok=True)
+    else:
+        setup_new_project(
+            cfg,
+            number,
+            refresh=False,
+            dry_run=dry_run,
+            open_premiere=False,
+        )
+        if dry_run:
+            return
 
     ssd_path, _ = project_root(cfg, folder_name)
     prproj_path = ssd_path / f"{folder_name}.prproj"
 
-    # Step 2 — ingest SD -> Video/
     if not skip_ingest:
         compare = compare_sd_cards_from_config(
             cfg, cfg.get("footage_extensions", [".mp4", ".mov"])
         )
         print_compare_report(compare)
-        ingest_footage(cfg, compare=compare, shoot_date=folder_name, dry_run=False)
+        ingest_footage(
+            cfg,
+            compare=compare,
+            shoot_date=folder_name,
+            pickup_subfolder=pickup_run.shots_folder if pickup_run else None,
+            dry_run=False,
+        )
 
-    # Step 3 — Premiere: auto-create project on SSD, import Video/
+    import_dir = None
+    proxies_override = None
+    import_label = ""
+    if pickup_run:
+        import_dir = ssd_path / pickup_run.shots_folder
+        proxies_override = import_dir / proxy_subfolder_name(cfg)
+        import_label = pickup_run.shots_folder
+
     jsx_path = write_premiere_setup_script(
-        cfg, ssd_path, folder_name, prproj_path, script_number=entry.number
+        cfg,
+        ssd_path,
+        folder_name,
+        prproj_path,
+        script_number=entry.number,
+        import_dir=import_dir,
+        proxies_dir_override=proxies_override,
+        import_label=import_label,
     )
     console.print(f"\n[bold]Premiere automation:[/bold] {jsx_path}")
 
@@ -75,9 +103,10 @@ def run_full_workflow(
             prproj_path=prproj_path,
             project_folder=ssd_path,
         )
+        target = import_label or "Video"
         console.print(
-            "\n[dim]Premiere should open, create [bold]" + folder_name + "[/bold], "
-            "set scratch disks to the SSD folder, and import Video/.[/dim]"
+            f"\n[dim]Premiere should open project [bold]{folder_name}[/bold], "
+            f"import {target}/, and queue proxies.[/dim]"
         )
         console.print("[dim]Close Premiere first if it was already running.[/dim]")
 
@@ -91,5 +120,9 @@ def run_full_workflow(
     else:
         console.print(f"\n[bold]When proxies finish on SSD (Soju):[/bold]")
         console.print(f"  python main.py watch-backup --number {number}")
+        if pickup_run:
+            console.print(
+                f"  (Pick-up #{pickup_run.number} → {pickup_run.final_proxies_folder}/ on HDD + Drive)"
+            )
         console.print(f"  Or: python main.py workflow --number {number} --wait-backup")
         console.print(f"  Drive: python main.py watch-upload --number {number}")

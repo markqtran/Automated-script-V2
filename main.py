@@ -379,8 +379,24 @@ def cmd_upload_drive(
         raise click.UsageError("Provide --folder or --number")
     if folder_name is None:
         folder_name = Path(folder).name
+    from src.pickup import load_pickup_run, pickup_final_proxies_path
+
+    ssd_path = project_root(cfg, folder_name)[0]
+    pickup = load_pickup_run(ssd_path)
     backup_proxies_to_hdd(cfg, folder_name, dry_run=dry_run)
-    upload_to_drive(folder, cfg, project_file=project, dry_run=dry_run)
+    upload_kwargs: dict = {}
+    if pickup:
+        final = pickup_final_proxies_path(ssd_path, pickup)
+        if final.is_dir():
+            upload_kwargs["proxies_path"] = final
+            upload_kwargs["proxies_upload_name"] = pickup.final_proxies_folder
+    upload_to_drive(
+        folder,
+        cfg,
+        project_file=project,
+        dry_run=dry_run,
+        **upload_kwargs,
+    )
 
 
 @cli.command("audit-assets")

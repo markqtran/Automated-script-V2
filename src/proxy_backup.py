@@ -16,6 +16,17 @@ from .utils import format_bytes
 console = Console()
 
 
+def _hdd_proxies_path(cfg: dict, hdd_project: Path) -> Path:
+    """Mirror SSD layout: project/Video/Proxies/."""
+    from .premiere_proxy import proxy_subfolder_name
+    from .project_paths import proxies_dir, video_folder_name
+
+    video = video_folder_name(cfg)
+    proxy_name = proxy_subfolder_name(cfg)
+    found = proxies_dir(cfg, hdd_project)
+    return found if found else hdd_project / video / proxy_name
+
+
 def _proxy_files_under(folder: Path) -> list[Path]:
     if not folder.is_dir():
         return []
@@ -25,11 +36,31 @@ def _proxy_files_under(folder: Path) -> list[Path]:
     )
 
 
-def _collect_ssd_proxy_files(cfg: dict, folder_name: str) -> tuple[Path, list[Path]]:
+def _collect_ssd_proxy_files(
+    cfg: dict,
+    folder_name: str,
+    *,
+    pickup_proxies_folder: str | None = None,
+) -> tuple[Path, list[Path]]:
     """
-    Prefer Video/Proxies/; if empty, include *_Proxy* files anywhere under Video/.
+    Prefer Video/Proxies/ or pick-up Pickup Proxies [#N]/ on SSD.
     """
     ssd_root, _ = project_root(cfg, folder_name)
+
+    if pickup_proxies_folder:
+        final = ssd_root / pickup_proxies_folder
+        files = _proxy_files_under(final)
+        if files:
+            return final, files
+        from .pickup import load_pickup_run, pickup_working_proxies_path
+
+        run = load_pickup_run(ssd_root)
+        if run:
+            working = pickup_working_proxies_path(ssd_root, run)
+            files = _proxy_files_under(working)
+            if files:
+                return working, files
+
     canonical = proxies_path(cfg, folder_name, destination="ssd")
     discovered = proxies_dir(cfg, ssd_root)
     source_root = discovered if discovered else canonical
@@ -118,14 +149,32 @@ def backup_proxies_to_hdd(
     folder_name: str,
     *,
     dry_run: bool = False,
+    pickup_proxies_folder: str | None = None,
 ) -> dict:
     """
-    Copy SSD Video/Proxies/ and .prproj to the same project folder on hdd_backup.
+    Copy SSD proxies and .prproj to hdd_backup.
+
+    Primary run: Video/Proxies/
+    Pick-up run: Pickup Proxies/ or Pickup Proxies #N/ at project root.
     """
     verify = cfg.get("ingest", {}).get("verify_checksum", True)
     ssd_root, hdd_root = project_root(cfg, folder_name)
-    ssd_proxy_root, sources = _collect_ssd_proxy_files(cfg, folder_name)
-    hdd_proxy = proxies_path(cfg, folder_name, destination="hdd", create=True)
+
+    from .pickup import load_pickup_run
+
+    pickup = load_pickup_run(ssd_root)
+    if pickup and not pickup_proxies_folder:
+        pickup_proxies_folder = pickup.final_proxies_folder
+
+    ssd_proxy_root, sources = _collect_ssd_proxy_files(
+        cfg, folder_name, pickup_proxies_folder=pickup_proxies_folder
+    )
+
+    if pickup_proxies_folder:
+        hdd_proxy = hdd_root / pickup_proxies_folder
+        hdd_proxy.mkdir(parents=True, exist_ok=True)
+    else:
+        hdd_proxy = _hdd_proxies_path(cfg, hdd_root)
 
     stats = {
         "copied": 0,
@@ -159,9 +208,10 @@ def backup_proxies_to_hdd(
         _backup_prproj_to_hdd(cfg, ssd_root, hdd_root, verify=verify, dry_run=dry_run, stats=stats)
         return stats
 
-    # Fast path: single canonical Proxies folder with normal layout
+    # Fast path: canonical Video/Proxies layout only
     use_robocopy = (
-        ssd_proxy_root.resolve() == proxies_path(cfg, folder_name, destination="ssd").resolve()
+        not pickup_proxies_folder
+        and ssd_proxy_root.resolve() == proxies_path(cfg, folder_name, destination="ssd").resolve()
         and len(sources) == len(_proxy_files_under(ssd_proxy_root))
         and _robocopy_proxies(ssd_proxy_root, hdd_proxy)
     )
@@ -175,11 +225,6 @@ def backup_proxies_to_hdd(
         return stats
 
     hdd_proxy.mkdir(parents=True, exist_ok=True)
-    copy_root = (
-        ssd_proxy_root
-        if ssd_proxy_root.resolve() == proxies_path(cfg, folder_name, destination="ssd").resolve()
-        else None
-    )
 
     with Progress(
         SpinnerColumn(),
@@ -190,12 +235,8 @@ def backup_proxies_to_hdd(
     ) as progress:
         task = progress.add_task("Proxies → HDD...", total=len(sources))
         for src in sources:
-            if copy_root:
-                rel = src.relative_to(copy_root)
-                dest = hdd_proxy / rel
-            else:
-                rel = src.relative_to(video_dir(cfg, folder_name, destination="ssd"))
-                dest = hdd_proxy.parent / rel
+            rel = src.relative_to(ssd_proxy_root)
+            dest = hdd_proxy / rel
             progress.update(task, description=str(rel)[:50])
             ok, msg = _copy_file(src, dest, verify, dry_run=False)
             if ok:

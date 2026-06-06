@@ -80,11 +80,14 @@ def upload_to_drive(
     cfg: dict,
     project_file: str | Path | None = None,
     dry_run: bool = False,
+    *,
+    proxies_path: Path | None = None,
+    proxies_upload_name: str | None = None,
 ) -> dict:
     """
     Upload Proxies folder + .prproj to Google Drive (assistant editor handoff).
-    Looks for Video/Proxies/ (Premiere) or Proxies/ at project root.
-    Does not upload original camera files.
+
+    For pick-up runs, pass proxies_path and proxies_upload_name (e.g. Pickup Proxies).
     """
     gdrive = cfg.get("google_drive", {})
     folder_id = gdrive.get("folder_id")
@@ -119,9 +122,9 @@ def upload_to_drive(
         result = subprocess.run(cmd)
         return result.returncode == 0
 
-    # Upload Proxies only (Premiere creates Video/Proxies next to originals)
-    proxy_path = proxies_dir(cfg, local)
-    proxy_name = proxies_folder_name(cfg)
+    # Upload Proxies (Video/Proxies or pick-up Pickup Proxies [#N])
+    proxy_path = proxies_path if proxies_path else proxies_dir(cfg, local)
+    proxy_name = proxies_upload_name or proxies_folder_name(cfg)
     if proxy_path:
         ok = _run_rclone(proxy_path, f"{dest}/{proxy_name}")
         stats["uploads" if ok else "errors"] += 1
