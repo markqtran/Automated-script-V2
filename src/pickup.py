@@ -55,16 +55,24 @@ def _folder_has_footage(path: Path, extensions: list[str]) -> bool:
 def detect_primary_run_exists(cfg: dict, folder_name: str) -> bool:
     """True if this script already has a first-run project on SSD or HDD."""
     ssd_path, hdd_path = project_root(cfg, folder_name)
+
+    if not ssd_path.is_dir() and not hdd_path.is_dir():
+        return False
+
     extensions = cfg.get("footage_extensions", [".mp4", ".mov", ".xml"])
     video = video_folder_name(cfg)
 
     if (ssd_path / f"{folder_name}.prproj").exists():
         return True
+    if (hdd_path / f"{folder_name}.prproj").exists():
+        return True
     if _folder_has_footage(ssd_path / video, extensions):
         return True
     if _folder_has_footage(hdd_path / video, extensions):
         return True
-    if any(PICKUP_SHOTS_RE.match(p.name) for p in ssd_path.iterdir() if p.is_dir()):
+    if ssd_path.is_dir() and any(
+        PICKUP_SHOTS_RE.match(p.name) for p in ssd_path.iterdir() if p.is_dir()
+    ):
         return True
     return False
 
