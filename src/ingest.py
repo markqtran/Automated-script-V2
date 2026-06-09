@@ -6,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 from .premiere_proxy import proxy_subfolder_name
 from .project_paths import project_root, video_dir, video_folder_name
@@ -14,8 +13,8 @@ from .sd_compare import CompareResult, compare_sd_cards_from_config
 from .utils import (
     copy_file_robust,
     format_bytes,
-    normalize_path,
     safe_file_size,
+    safe_unlink,
     sha256_file_with_retry,
 )
 
@@ -36,11 +35,6 @@ def _ingest_roots(
     date_fmt = cfg["ingest"].get("date_folder_format", "%Y-%m-%d")
     folder = folder_name or datetime.now().strftime(date_fmt)
     return video_dir(cfg, folder, destination="ssd"), video_dir(cfg, folder, destination="hdd")
-
-
-def _dest_paths(cfg: dict, shoot_date: str | None = None) -> tuple[Path, Path]:
-    """SSD/HDD ingest targets: project folder / Video / (camera paths)."""
-    return _ingest_roots(cfg, shoot_date)
 
 
 def _video_dest_relative(rel: str, cfg: dict) -> str | None:
@@ -85,17 +79,18 @@ def _copy_file(
     force: bool = False,
     max_retries: int = 8,
     retry_delay: float = 3.0,
+    hash_verify: bool = True,
 ) -> tuple[bool, str]:
     """Copy one file. Returns (copied, message). Skips if dest exists and matches."""
     try:
         src_size = safe_file_size(src)
         if src_size is None:
-            return False, "FAILED cannot read source file on SD/drive"
+            return False, f"FAILED cannot read source: {src}"
 
         if dest.exists() and not force:
             dest_size = safe_file_size(dest)
             if dest_size is not None and dest_size == src_size:
-                if not verify:
+                if not verify or not hash_verify:
                     return False, "skipped (exists)"
                 try:
                     if sha256_file_with_retry(
@@ -119,39 +114,85 @@ def _copy_file(
         if dry_run:
             return True, "would copy"
 
-        src_hash = copy_file_robust(
+        console.print(f"  [dim]Copying[/dim] {src.name} [dim]to[/dim] {dest.parent.name}\\")
+
+        result = copy_file_robust(
             src,
             dest,
             max_retries=max_retries,
             retry_delay=retry_delay,
-            compute_hash=verify,
+            compute_hash=verify and hash_verify,
         )
+        if not result.ok:
+            return False, f"FAILED {result.error}"
 
         if verify:
             dest_size = safe_file_size(dest)
             if dest_size != src_size:
-                dest.unlink(missing_ok=True)
+                safe_unlink(dest)
                 return False, "FAILED size mismatch after copy"
-            dest_hash = sha256_file_with_retry(
-                dest,
-                max_retries=max_retries,
-                retry_delay=retry_delay,
-            )
-            if src_hash is None:
-                src_hash = sha256_file_with_retry(
-                    src,
-                    max_retries=max_retries,
-                    retry_delay=retry_delay,
-                )
-            if src_hash != dest_hash:
-                dest.unlink(missing_ok=True)
-                return False, "FAILED checksum"
+            if hash_verify:
+                try:
+                    dest_hash = sha256_file_with_retry(
+                        dest,
+                        max_retries=max_retries,
+                        retry_delay=retry_delay,
+                    )
+                except OSError as exc:
+                    safe_unlink(dest)
+                    return False, f"FAILED verify dest {exc}"
+                src_hash = result.src_hash
+                if src_hash is None:
+                    try:
+                        src_hash = sha256_file_with_retry(
+                            src,
+                            max_retries=max_retries,
+                            retry_delay=retry_delay,
+                        )
+                    except OSError as exc:
+                        safe_unlink(dest)
+                        return False, f"FAILED verify source {exc}"
+                if src_hash != dest_hash:
+                    safe_unlink(dest)
+                    return False, "FAILED checksum"
         return True, "copied"
     except OSError as exc:
-        dest.unlink(missing_ok=True)
-        partial = dest.with_name(dest.name + ".partial")
-        partial.unlink(missing_ok=True)
+        safe_unlink(dest)
+        safe_unlink(dest.with_name(dest.name + ".partial"))
         return False, f"FAILED {exc}"
+
+
+def _copy_sd_to_ssd(
+    to_copy: list[tuple[str, Path, str, bool]],
+    ssd_root: Path,
+    *,
+    verify: bool,
+    dry_run: bool,
+    copy_opts: dict,
+    stats: dict,
+) -> None:
+    total = len(to_copy)
+    for index, (dest_rel, src, _rel, force) in enumerate(sorted(to_copy, key=lambda x: x[0]), start=1):
+        ssd_dest = ssd_root / Path(dest_rel)
+        console.print(f"\n[bold]({index}/{total})[/bold] {dest_rel}")
+        console.print(f"  From: {src}")
+
+        ok, msg = _copy_file(
+            src,
+            ssd_dest,
+            verify,
+            dry_run,
+            force=force,
+            **copy_opts,
+        )
+        if ok:
+            stats["copied_ssd"] += 1
+            stats["bytes"] += safe_file_size(ssd_dest) or safe_file_size(src) or 0
+        elif msg.startswith("skipped"):
+            stats["skipped"] += 1
+        elif msg.startswith("FAILED"):
+            stats["failed"] += 1
+            console.print(f"[red]  {msg}[/red]")
 
 
 def ingest_footage(
@@ -164,14 +205,25 @@ def ingest_footage(
     plan=None,
 ) -> dict:
     """
-    Copy all footage from SD card(s) into project/Video/ on SSD and HDD.
-    When pickup_subfolder is set (e.g. 'Pick Up Shots #1'), ingest there instead.
+    Copy footage from SD card(s) to SSD Video/, then mirror SSD → HDD.
+
+    Phase 1 reads the SD card once per file. Phase 2 copies SSD → HDD locally
+    (no SD reads), which avoids overloading USB and bracket-path robocopy bugs.
     """
     extensions = cfg.get("footage_extensions", [".mp4", ".mov"])
     ingest_cfg = cfg.get("ingest", {})
     verify = ingest_cfg.get("verify_checksum", True)
     max_retries = int(ingest_cfg.get("copy_retries", 8))
     retry_delay = float(ingest_cfg.get("copy_retry_delay_seconds", 3.0))
+
+    sd_primary = cfg.get("sd_cards", {}).get("primary", "")
+    from .drive_detect import is_removable_drive
+
+    hash_verify = verify and not is_removable_drive(sd_primary)
+    if verify and not hash_verify:
+        console.print(
+            "[dim]SD ingest — size verify only (checksum skipped on removable SD reader).[/dim]"
+        )
 
     if compare is None:
         compare = compare_sd_cards_from_config(cfg, extensions)
@@ -214,71 +266,55 @@ def ingest_footage(
     stats = {"copied_ssd": 0, "copied_hdd": 0, "skipped": 0, "failed": 0, "bytes": 0}
 
     console.print(f"\n[bold]Ingesting {len(to_copy)} file(s) into {ingest_label}/[/bold]")
-    console.print("  (CLIP contents only — no PRIVATE/M4ROOT/CLIP folders on SSD)")
+    console.print("  Phase 1: SD card → SSD (editing drive)")
+    console.print("  Phase 2: SSD → HDD backup (local copy, no SD reads)")
     console.print(f"  SSD: {ssd_root}")
     console.print(f"  HDD: {hdd_root}\n")
     if skipped_outside_clip:
         console.print(f"  [dim]Skipped {skipped_outside_clip} file(s) outside CLIP on SD card[/dim]\n")
 
-    copy_opts = {"max_retries": max_retries, "retry_delay": retry_delay}
+    copy_opts = {
+        "max_retries": max_retries,
+        "retry_delay": retry_delay,
+        "hash_verify": hash_verify,
+    }
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Copying...", total=len(to_copy))
+    _copy_sd_to_ssd(
+        to_copy,
+        ssd_root,
+        verify=verify,
+        dry_run=dry_run,
+        copy_opts=copy_opts,
+        stats=stats,
+    )
 
-        for dest_rel, src, rel, force in sorted(to_copy, key=lambda x: x[0]):
-            try:
-                progress.update(task, description=dest_rel[:60])
-
-                ssd_dest = ssd_root / dest_rel.replace("/", "\\")
-                hdd_dest = hdd_root / dest_rel.replace("/", "\\")
-
-                ok_ssd, msg_ssd = _copy_file(
-                    src,
-                    ssd_dest,
-                    verify,
-                    dry_run,
-                    force=force,
-                    **copy_opts,
-                )
-                if ok_ssd:
-                    stats["copied_ssd"] += 1
-                    stats["bytes"] += safe_file_size(ssd_dest) or safe_file_size(src) or 0
-                elif msg_ssd.startswith("skipped"):
-                    stats["skipped"] += 1
-                elif msg_ssd.startswith("FAILED"):
-                    stats["failed"] += 1
-                    console.print(f"[red]SSD {dest_rel}: {msg_ssd}[/red]")
-
-                hdd_src = ssd_dest if ssd_dest.is_file() else src
-                hdd_verify = verify and hdd_src == src
-                ok_hdd, msg_hdd = _copy_file(
-                    hdd_src,
-                    hdd_dest,
-                    hdd_verify,
-                    dry_run,
-                    force=force,
-                    **copy_opts,
-                )
-                if ok_hdd:
-                    stats["copied_hdd"] += 1
-                elif msg_hdd.startswith("skipped"):
-                    stats["skipped"] += 1
-                elif msg_hdd.startswith("FAILED"):
-                    stats["failed"] += 1
-                    console.print(f"[red]HDD {dest_rel}: {msg_hdd}[/red]")
-            except OSError as exc:
+    if stats["failed"] == 0 and not dry_run and to_copy:
+        console.print(f"\n[bold]Phase 2: SSD → HDD[/bold]")
+        for dest_rel, _, _, _ in sorted(to_copy, key=lambda x: x[0]):
+            ssd_file = ssd_root / Path(dest_rel)
+            hdd_file = hdd_root / Path(dest_rel)
+            if not ssd_file.is_file():
+                continue
+            if hdd_file.is_file() and safe_file_size(hdd_file) == safe_file_size(ssd_file):
+                stats["skipped"] += 1
+                continue
+            result = copy_file_robust(
+                ssd_file,
+                hdd_file,
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+            )
+            if result.ok:
+                stats["copied_hdd"] += 1
+            else:
                 stats["failed"] += 1
-                console.print(f"[red]{dest_rel}: {exc}[/red]")
+                console.print(f"[red]HDD {dest_rel}: {result.error}[/red]")
 
-            progress.advance(task)
-
-    console.print(f"\n[green]Ingest complete.[/green]" if stats["failed"] == 0 else "\n[yellow]Ingest finished with errors.[/yellow]")
+    console.print(
+        f"\n[green]Ingest complete.[/green]"
+        if stats["failed"] == 0
+        else "\n[yellow]Ingest finished with errors.[/yellow]"
+    )
     console.print(f"  SSD copies: {stats['copied_ssd']}")
     console.print(f"  HDD copies: {stats['copied_hdd']}")
     console.print(f"  Skipped:    {stats['skipped']}")
@@ -287,9 +323,8 @@ def ingest_footage(
     if stats["failed"]:
         console.print(f"  [red]Failed:     {stats['failed']}[/red]")
         console.print(
-            "\n[dim]Tip: Re-plug the SD card and SSD/HDD, wait a few seconds, then re-run. "
-            "You can set ingest.verify_checksum: false in config for faster copies on flaky cards. "
-            f"Retries: up to {max_retries} per file.[/dim]"
+            "\n[dim]Project folders use [004] brackets — ingest now uses Windows long-path "
+            "copy for those paths. Re-run after Quick Setup → Auto-detect if the SD letter changed.[/dim]"
         )
         raise SystemExit(1)
     console.print(f"  Data moved: {format_bytes(stats['bytes'])}")

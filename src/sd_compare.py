@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .drive_settings import DRIVE_NA_LABEL, is_drive_na
+from .drive_detect import list_removable_drives
 from .utils import format_bytes, normalize_path, scan_directory
 
 console = Console()
@@ -44,9 +45,9 @@ class CompareResult:
         """Map relative path -> source path for every file across both cards."""
         result: dict[str, Path] = {}
         for rel in self.matching + self.primary_only:
-            result[rel] = self.primary_path / rel.replace("/", "\\")
+            result[rel] = self.primary_path / rel
         for rel in self.backup_only:
-            result[rel] = self.backup_path / rel.replace("/", "\\")
+            result[rel] = self.backup_path / rel
         return result
 
 
@@ -74,7 +75,13 @@ def compare_sd_cards_from_config(cfg: dict, extensions: list[str]) -> CompareRes
 
     primary_path = normalize_path(primary)
     if not primary_path.exists():
-        raise FileNotFoundError(f"Primary SD card not found: {primary_path}")
+        removable = list_removable_drives()
+        detected = ", ".join(removable) if removable else "none plugged in"
+        raise FileNotFoundError(
+            f"Primary SD card not found: {primary_path}\n"
+            f"  Removable drives detected now: {detected}\n"
+            f"  Fix: plug in the SD card, open Quick Setup → Auto-detect drives, then Save/Install."
+        )
 
     if single_card or is_drive_na(backup):
         console.print("[dim]Single SD card mode — ingesting from primary card only.[/dim]")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import string
+import sys
 from pathlib import Path
 
 from .drive_settings import DRIVE_NA_LABEL
@@ -23,6 +24,20 @@ def _drive_size(root: str) -> int:
         return shutil.disk_usage(root).total
     except OSError:
         return 0
+
+
+def is_removable_drive(path: str | Path) -> bool:
+    """True when path is on a removable drive (typical SD card reader)."""
+    if sys.platform != "win32":
+        return False
+    text = str(path).strip()
+    if len(text) >= 2 and text[1] == ":":
+        root = text[:2] + "\\"
+    else:
+        return False
+    if not Path(root).exists():
+        return False
+    return _drive_type(root) == DRIVE_REMOVABLE
 
 
 def list_removable_drives() -> list[str]:
