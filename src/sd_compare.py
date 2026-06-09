@@ -8,6 +8,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+from .drive_settings import DRIVE_NA_LABEL, is_drive_na
 from .utils import format_bytes, normalize_path, scan_directory
 
 console = Console()
@@ -75,7 +76,7 @@ def compare_sd_cards_from_config(cfg: dict, extensions: list[str]) -> CompareRes
     if not primary_path.exists():
         raise FileNotFoundError(f"Primary SD card not found: {primary_path}")
 
-    if single_card or not backup:
+    if single_card or is_drive_na(backup):
         console.print("[dim]Single SD card mode — ingesting from primary card only.[/dim]")
         return _compare_primary_only(primary_path, extensions)
 

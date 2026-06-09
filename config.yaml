@@ -26,6 +26,9 @@ google_drive:
 premiere:
   exe_path: ""
   auto_run_script: true
+  auto_create_proxies: true
+  proxy_ingest_preset: ""
+  proxy_encode_preset: ""
 
 # Project folder layout (matches your Premiere workflow)
 project:

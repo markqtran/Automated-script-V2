@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .app_paths import resource_path
+
 
 def _search_epr_files() -> list[Path]:
     """Find .epr presets under Adobe install and user Documents."""
@@ -108,7 +110,7 @@ def resolve_proxy_preset_path(cfg: dict) -> str:
             return str(path.resolve()).replace("\\", "/")
 
     for name in ("NDP_Proxy_Ingest.epr", "Proxy_Ingest.epr", "ProRes_Proxy_Ingest.epr"):
-        candidate = Path("templates") / name
+        candidate = resource_path("templates") / name
         if candidate.is_file():
             return str(candidate.resolve()).replace("\\", "/")
 
@@ -129,7 +131,7 @@ def resolve_encode_preset_path(cfg: dict) -> str:
             return str(path.resolve()).replace("\\", "/")
 
     for name in ("NDP_Proxy_Encode.epr", "Proxy_Encode.epr"):
-        candidate = Path("templates") / name
+        candidate = resource_path("templates") / name
         if candidate.is_file():
             return str(candidate.resolve()).replace("\\", "/")
 

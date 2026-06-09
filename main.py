@@ -19,6 +19,7 @@ Usage:
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -37,7 +38,7 @@ from src.scripts import resolve_project_folder
 from src.sd_compare import compare_sd_cards_from_config, print_compare_report
 from src.proxy_backup import backup_proxies_to_hdd
 from src.watch_upload import watch_and_backup_hdd, watch_and_upload
-from src.workflow import run_full_workflow
+from src.workflow import run_full_workflow, run_phase_one, run_phase_two
 
 console = Console()
 
@@ -47,13 +48,18 @@ def _cfg_path(config: str) -> Path:
 
 
 @click.group()
-@click.option("--config", "-c", default="config.yaml", help="Path to config file")
+@click.option(
+    "--config",
+    "-c",
+    default=None,
+    help="Path to config file (default: config.yaml or AppData)",
+)
 @click.pass_context
-def cli(ctx: click.Context, config: str) -> None:
+def cli(ctx: click.Context, config: str | None) -> None:
     """Automate your filming to edit to backup workflow."""
     ctx.ensure_object(dict)
     try:
-        ctx.obj["cfg"] = load_config(_cfg_path(config))
+        ctx.obj["cfg"] = load_config(_cfg_path(config) if config else None)
     except FileNotFoundError as e:
         console.print(f"[red]{e}[/red]")
         raise SystemExit(1)
@@ -187,6 +193,57 @@ def workflow(
         open_premiere=not no_premiere,
         wait_backup=wait_backup,
         watch_upload=watch_upload,
+        dry_run=dry_run,
+    )
+
+
+@cli.command("workflow-phase1")
+@click.option("--number", "-n", required=True, help="3-digit script number (e.g. 003)")
+@click.option("--refresh", is_flag=True, help="Refresh script list from Google Drive")
+@click.option("--skip-ingest", is_flag=True, help="Skip SD card copy (folders + Premiere only)")
+@click.option("--no-premiere", is_flag=True, help="Do not launch Premiere")
+@click.option("--dry-run", is_flag=True)
+@click.pass_context
+def cmd_workflow_phase1(
+    ctx: click.Context,
+    number: str,
+    refresh: bool,
+    skip_ingest: bool,
+    no_premiere: bool,
+    dry_run: bool,
+) -> None:
+    """
+    Phase 1: create project, ingest SD to SSD/HDD, import in Premiere.
+    Checks for duplicate/conflicting files before copying.
+    """
+    run_phase_one(
+        ctx.obj["cfg"],
+        number,
+        refresh=refresh,
+        skip_ingest=skip_ingest,
+        open_premiere=not no_premiere,
+        dry_run=dry_run,
+    )
+
+
+@cli.command("workflow-phase2")
+@click.option("--number", "-n", required=True, help="3-digit script number (e.g. 003)")
+@click.option("--timeout", default=180, help="Max minutes to wait for proxies on SSD")
+@click.option("--dry-run", is_flag=True)
+@click.pass_context
+def cmd_workflow_phase2(
+    ctx: click.Context,
+    number: str,
+    timeout: int,
+    dry_run: bool,
+) -> None:
+    """
+    Phase 2: wait for proxies, back up to HDD, upload to Google Drive.
+    """
+    run_phase_two(
+        ctx.obj["cfg"],
+        number,
+        timeout_minutes=timeout,
         dry_run=dry_run,
     )
 
@@ -459,4 +516,9 @@ def finalize(ctx: click.Context, project_folder: str, hdd_folder: str | None, dr
 
 
 if __name__ == "__main__":
-    cli()
+    if len(sys.argv) == 1:
+        from src.gui.app import run_gui
+
+        run_gui()
+    else:
+        cli()

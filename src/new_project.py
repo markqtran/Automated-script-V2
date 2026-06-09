@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from .app_paths import resource_path
 from .premiere_jsx import write_premiere_setup_script
 from .premiere_launch import launch_premiere_automation
 from .project_paths import project_root, video_folder_name
@@ -16,7 +17,7 @@ from .scripts import get_script_by_number, get_scripts, print_scripts_table
 
 console = Console()
 
-TEMPLATE_PATH = Path("templates") / "project_template.prproj"
+TEMPLATE_PATH = resource_path("templates") / "project_template.prproj"
 PROJECT_META = ".project_info.json"
 
 
@@ -114,9 +115,9 @@ def setup_new_project(
     console.print(f"  Folder:  {entry.folder_name}\n")
 
     if ssd_path.exists() and not dry_run:
-        from click import confirm
+        from .ingest_plan import confirm_existing_project
 
-        if not confirm(f"SSD folder already exists at {ssd_path}. Continue?", default=False):
+        if not confirm_existing_project(ssd_path):
             raise SystemExit(0)
 
     if dry_run:

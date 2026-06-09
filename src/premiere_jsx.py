@@ -29,6 +29,7 @@ def generate_premiere_setup_script(
     proxies_dir_override: Path | None = None,
     import_label: str = "",
     continue_existing_project: bool = False,
+    queue_proxies: bool | None = None,
 ) -> str:
     """
     JSX run inside Premiere (auto via /C es.processFile or File > Scripts):
@@ -49,7 +50,7 @@ def generate_premiere_setup_script(
     proxy_preset = resolve_proxy_preset_path(cfg)
     encode_preset = resolve_encode_preset_path(cfg)
     proxy_sub = proxy_subfolder_name(cfg)
-    do_proxies = auto_create_proxies(cfg)
+    do_proxies = auto_create_proxies(cfg) if queue_proxies is None else queue_proxies
 
     literals = {
         "prproj": prproj_jsx,
@@ -370,6 +371,7 @@ def write_premiere_setup_script(
     proxies_dir_override: Path | None = None,
     import_label: str = "",
     continue_existing_project: bool = False,
+    queue_proxies: bool | None = None,
 ) -> Path:
     jsx_path = project_root / "automate_premiere.jsx"
     jsx_path.write_text(
@@ -383,6 +385,7 @@ def write_premiere_setup_script(
             proxies_dir_override=proxies_dir_override,
             import_label=import_label,
             continue_existing_project=continue_existing_project,
+            queue_proxies=queue_proxies,
         ),
         encoding="utf-8",
     )

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -12,7 +11,13 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from .premiere_proxy import proxy_subfolder_name
 from .project_paths import project_root, video_dir, video_folder_name
 from .sd_compare import CompareResult, compare_sd_cards_from_config
-from .utils import format_bytes, normalize_path, sha256_file
+from .utils import (
+    copy_file_robust,
+    format_bytes,
+    normalize_path,
+    safe_file_size,
+    sha256_file_with_retry,
+)
 
 console = Console()
 
@@ -76,28 +81,77 @@ def _copy_file(
     dest: Path,
     verify: bool,
     dry_run: bool,
+    *,
+    force: bool = False,
+    max_retries: int = 8,
+    retry_delay: float = 3.0,
 ) -> tuple[bool, str]:
     """Copy one file. Returns (copied, message). Skips if dest exists and matches."""
-    if dest.exists():
-        if dest.stat().st_size == src.stat().st_size:
-            if not verify:
-                return False, "skipped (exists)"
-            if sha256_file(src) == sha256_file(dest):
-                return False, "skipped (verified)"
-        elif dest.stat().st_size > src.stat().st_size:
-            return False, "skipped (dest larger)"
+    try:
+        src_size = safe_file_size(src)
+        if src_size is None:
+            return False, "FAILED cannot read source file on SD/drive"
 
-    if dry_run:
-        return True, "would copy"
+        if dest.exists() and not force:
+            dest_size = safe_file_size(dest)
+            if dest_size is not None and dest_size == src_size:
+                if not verify:
+                    return False, "skipped (exists)"
+                try:
+                    if sha256_file_with_retry(
+                        dest,
+                        max_retries=max_retries,
+                        retry_delay=retry_delay,
+                    ) == sha256_file_with_retry(
+                        src,
+                        max_retries=max_retries,
+                        retry_delay=retry_delay,
+                    ):
+                        return False, "skipped (verified)"
+                except OSError as exc:
+                    return False, f"FAILED verify {exc}"
+                return False, "skipped (conflict)"
+            if dest_size is not None and dest_size > src_size:
+                return False, "skipped (dest larger)"
+            if dest_size is not None:
+                return False, "skipped (conflict)"
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
+        if dry_run:
+            return True, "would copy"
 
-    if verify:
-        if sha256_file(src) != sha256_file(dest):
-            dest.unlink(missing_ok=True)
-            return False, "FAILED checksum"
-    return True, "copied"
+        src_hash = copy_file_robust(
+            src,
+            dest,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            compute_hash=verify,
+        )
+
+        if verify:
+            dest_size = safe_file_size(dest)
+            if dest_size != src_size:
+                dest.unlink(missing_ok=True)
+                return False, "FAILED size mismatch after copy"
+            dest_hash = sha256_file_with_retry(
+                dest,
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+            )
+            if src_hash is None:
+                src_hash = sha256_file_with_retry(
+                    src,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay,
+                )
+            if src_hash != dest_hash:
+                dest.unlink(missing_ok=True)
+                return False, "FAILED checksum"
+        return True, "copied"
+    except OSError as exc:
+        dest.unlink(missing_ok=True)
+        partial = dest.with_name(dest.name + ".partial")
+        partial.unlink(missing_ok=True)
+        return False, f"FAILED {exc}"
 
 
 def ingest_footage(
@@ -107,13 +161,17 @@ def ingest_footage(
     *,
     pickup_subfolder: str | None = None,
     dry_run: bool = False,
+    plan=None,
 ) -> dict:
     """
     Copy all footage from SD card(s) into project/Video/ on SSD and HDD.
     When pickup_subfolder is set (e.g. 'Pick Up Shots #1'), ingest there instead.
     """
     extensions = cfg.get("footage_extensions", [".mp4", ".mov"])
-    verify = cfg.get("ingest", {}).get("verify_checksum", True)
+    ingest_cfg = cfg.get("ingest", {})
+    verify = ingest_cfg.get("verify_checksum", True)
+    max_retries = int(ingest_cfg.get("copy_retries", 8))
+    retry_delay = float(ingest_cfg.get("copy_retry_delay_seconds", 3.0))
 
     if compare is None:
         compare = compare_sd_cards_from_config(cfg, extensions)
@@ -132,14 +190,26 @@ def ingest_footage(
     (ssd_root / proxy_name).mkdir(exist_ok=True)
     (hdd_root / proxy_name).mkdir(exist_ok=True)
 
-    to_copy: list[tuple[str, Path, str]] = []
+    to_copy: list[tuple[str, Path, str, bool]] = []
     skipped_outside_clip = 0
-    for rel, src in files.items():
-        dest_rel = _video_dest_relative(rel, cfg)
-        if dest_rel is None:
-            skipped_outside_clip += 1
-            continue
-        to_copy.append((dest_rel, src, rel))
+
+    if plan is not None:
+        from .ingest_plan import IngestPlan
+
+        assert isinstance(plan, IngestPlan)
+        skipped_outside_clip = plan.skipped_outside_clip
+        for dest_rel, src in plan.new_files:
+            to_copy.append((dest_rel, src, dest_rel, False))
+        if plan.overwrite_conflicts:
+            for dest_rel, src, _issue in plan.conflicts:
+                to_copy.append((dest_rel, src, dest_rel, True))
+    else:
+        for rel, src in files.items():
+            dest_rel = _video_dest_relative(rel, cfg)
+            if dest_rel is None:
+                skipped_outside_clip += 1
+                continue
+            to_copy.append((dest_rel, src, rel, False))
 
     stats = {"copied_ssd": 0, "copied_hdd": 0, "skipped": 0, "failed": 0, "bytes": 0}
 
@@ -150,6 +220,8 @@ def ingest_footage(
     if skipped_outside_clip:
         console.print(f"  [dim]Skipped {skipped_outside_clip} file(s) outside CLIP on SD card[/dim]\n")
 
+    copy_opts = {"max_retries": max_retries, "retry_delay": retry_delay}
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -159,28 +231,54 @@ def ingest_footage(
     ) as progress:
         task = progress.add_task("Copying...", total=len(to_copy))
 
-        for dest_rel, src, rel in sorted(to_copy, key=lambda x: x[0]):
-            progress.update(task, description=dest_rel[:60])
+        for dest_rel, src, rel, force in sorted(to_copy, key=lambda x: x[0]):
+            try:
+                progress.update(task, description=dest_rel[:60])
 
-            for label, root, key in [
-                ("SSD", ssd_root, "copied_ssd"),
-                ("HDD", hdd_root, "copied_hdd"),
-            ]:
-                dest = root / dest_rel.replace("/", "\\")
-                ok, msg = _copy_file(src, dest, verify, dry_run)
-                if ok:
-                    stats[key] += 1
-                    if label == "SSD":
-                        stats["bytes"] += src.stat().st_size
-                elif msg.startswith("skipped"):
+                ssd_dest = ssd_root / dest_rel.replace("/", "\\")
+                hdd_dest = hdd_root / dest_rel.replace("/", "\\")
+
+                ok_ssd, msg_ssd = _copy_file(
+                    src,
+                    ssd_dest,
+                    verify,
+                    dry_run,
+                    force=force,
+                    **copy_opts,
+                )
+                if ok_ssd:
+                    stats["copied_ssd"] += 1
+                    stats["bytes"] += safe_file_size(ssd_dest) or safe_file_size(src) or 0
+                elif msg_ssd.startswith("skipped"):
                     stats["skipped"] += 1
-                elif msg.startswith("FAILED"):
+                elif msg_ssd.startswith("FAILED"):
                     stats["failed"] += 1
-                    console.print(f"[red]{label} {dest_rel}: {msg}[/red]")
+                    console.print(f"[red]SSD {dest_rel}: {msg_ssd}[/red]")
+
+                hdd_src = ssd_dest if ssd_dest.is_file() else src
+                hdd_verify = verify and hdd_src == src
+                ok_hdd, msg_hdd = _copy_file(
+                    hdd_src,
+                    hdd_dest,
+                    hdd_verify,
+                    dry_run,
+                    force=force,
+                    **copy_opts,
+                )
+                if ok_hdd:
+                    stats["copied_hdd"] += 1
+                elif msg_hdd.startswith("skipped"):
+                    stats["skipped"] += 1
+                elif msg_hdd.startswith("FAILED"):
+                    stats["failed"] += 1
+                    console.print(f"[red]HDD {dest_rel}: {msg_hdd}[/red]")
+            except OSError as exc:
+                stats["failed"] += 1
+                console.print(f"[red]{dest_rel}: {exc}[/red]")
 
             progress.advance(task)
 
-    console.print(f"\n[green]Ingest complete.[/green]")
+    console.print(f"\n[green]Ingest complete.[/green]" if stats["failed"] == 0 else "\n[yellow]Ingest finished with errors.[/yellow]")
     console.print(f"  SSD copies: {stats['copied_ssd']}")
     console.print(f"  HDD copies: {stats['copied_hdd']}")
     console.print(f"  Skipped:    {stats['skipped']}")
@@ -188,6 +286,12 @@ def ingest_footage(
         console.print(f"  Not under CLIP: {skipped_outside_clip}")
     if stats["failed"]:
         console.print(f"  [red]Failed:     {stats['failed']}[/red]")
+        console.print(
+            "\n[dim]Tip: Re-plug the SD card and SSD/HDD, wait a few seconds, then re-run. "
+            "You can set ingest.verify_checksum: false in config for faster copies on flaky cards. "
+            f"Retries: up to {max_retries} per file.[/dim]"
+        )
+        raise SystemExit(1)
     console.print(f"  Data moved: {format_bytes(stats['bytes'])}")
 
     stats["ssd_path"] = str(ssd_root.parent)

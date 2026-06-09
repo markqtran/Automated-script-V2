@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 config.yaml
 templates/project_template.prproj
-rclone.exe
-rclone.zip
+dist/
+build/
+*.spec.bak

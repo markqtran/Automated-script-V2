@@ -87,6 +87,8 @@ asset_extensions:
 
 ingest:
   verify_checksum: true
+  copy_retries: 8                 # Retries for SD/USB I/O errors (WinError 1117, 121, …)
+  copy_retry_delay_seconds: 3     # Wait between retries (multiplied by attempt #)
   prefer_card_with_more_files: true
   date_folder_format: "%Y-%m-%d"
   clip_contents_only: true       # Only copy files inside CLIP/ on the SD card

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from .drive_settings import is_drive_na
 from .utils import normalize_path
 
 console = Console()
@@ -28,6 +29,12 @@ def mirror_backup(cfg: dict, dry_run: bool = False) -> dict:
     Skips gracefully if the mirror drive is not connected or mirror is disabled.
     """
     mirror_cfg = cfg.get("mirror", {})
+    mirror_dest = cfg.get("destinations", {}).get("hdd_backup_mirror", "")
+
+    if is_drive_na(mirror_dest):
+        console.print("[yellow]Mirror skipped (no second HDD — set to N/A in Settings).[/yellow]")
+        return {"skipped": True, "reason": "not_configured"}
+
     if mirror_cfg.get("enabled") is False:
         console.print("[yellow]Mirror skipped (disabled in config).[/yellow]")
         return {"skipped": True, "reason": "disabled"}

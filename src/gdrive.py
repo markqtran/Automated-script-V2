@@ -2,43 +2,23 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 
 from rich.console import Console
 
 from .project_paths import find_prproj, proxies_dir, proxies_folder_name
+from .rclone_setup import find_rclone
 from .utils import normalize_path
 
 console = Console()
-
-
-def _find_rclone() -> str:
-    path = shutil.which("rclone")
-    if path:
-        return path
-
-    # Also check project folder (install-rclone.ps1 puts it here)
-    candidates = [
-        Path.cwd() / "rclone.exe",
-        Path(__file__).resolve().parent.parent / "rclone.exe",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-
-    raise RuntimeError(
-        "rclone not found. Run: powershell -ExecutionPolicy Bypass -File install-rclone.ps1\n"
-        "Or download from https://rclone.org/downloads/"
-    )
 
 
 def list_drive_files(cfg: dict, folder_id: str) -> list[str]:
     """List filenames in a Google Drive folder via rclone."""
     gdrive = cfg.get("google_drive", {})
     remote = gdrive.get("rclone_remote", "gdrive")
-    rclone = _find_rclone()
+    rclone = find_rclone()
 
     cmd = [
         rclone,
@@ -98,8 +78,7 @@ def upload_to_drive(
     if not local.exists():
         raise FileNotFoundError(f"Local folder not found: {local}")
 
-    _find_rclone()
-    rclone = shutil.which("rclone") or "rclone"
+    rclone = find_rclone()
     project_name = local.name
     dest, drive_flags = _drive_dest(cfg, project_name)
 
@@ -135,8 +114,6 @@ def upload_to_drive(
         ok = _run_rclone(proxy_path, proxy_target)
         stats["uploads" if ok else "errors"] += 1
     elif proxies_path:
-        video = cfg.get("project", {}).get("video_folder", "Video")
-        proxy_name = proxies_folder_name(cfg)
         console.print(
             f"[yellow]No Proxies folder found.[/yellow]\n"
             f"  Expected: {proxies_path}\n"
