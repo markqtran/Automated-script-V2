@@ -14,21 +14,47 @@ if (-not $python) {
 $venvPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 $venvDir = Join-Path $PSScriptRoot '.venv'
 
-function Test-VenvPython {
-    param([string]$Path)
-    if (-not (Test-Path $Path)) { return $false }
-    & $Path -c "import sys" 2>$null
-    return $LASTEXITCODE -eq 0
+function Test-VenvUsable {
+    param(
+        [string]$VenvDir,
+        [string]$VenvPython
+    )
+
+    if (-not (Test-Path $VenvPython)) {
+        return $false
+    }
+
+    $cfg = Join-Path $VenvDir 'pyvenv.cfg'
+    if (Test-Path $cfg) {
+        foreach ($line in Get-Content $cfg) {
+            if ($line -match '^home\s*=\s*(.+)$') {
+                $home = $Matches[1].Trim().Trim('"')
+                $basePython = Join-Path $home 'python.exe'
+                if (-not (Test-Path $basePython)) {
+                    return $false
+                }
+            }
+        }
+    }
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $VenvPython -c "import sys" 1>$null 2>$null
+        return $LASTEXITCODE -eq 0
+    } finally {
+        $ErrorActionPreference = $previous
+    }
 }
 
-if (-not (Test-VenvPython $venvPython)) {
+if (-not (Test-VenvUsable -VenvDir $venvDir -VenvPython $venvPython)) {
     if (Test-Path $venvDir) {
-        Write-Host 'Removing broken .venv (often copied from another PC or old Python path)...' -ForegroundColor Yellow
+        Write-Host 'Removing broken .venv (copied from another PC or missing Python)...' -ForegroundColor Yellow
         Remove-Item -Recurse -Force $venvDir
     }
     Write-Host 'Creating virtual environment...'
     & $python.Source -m venv $venvDir
-    if (-not (Test-VenvPython $venvPython)) {
+    if (-not (Test-VenvUsable -VenvDir $venvDir -VenvPython $venvPython)) {
         Write-Host "Could not create a working venv at $venvPython" -ForegroundColor Red
         exit 1
     }
