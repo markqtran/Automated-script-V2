@@ -498,3 +498,5 @@ If the backup card was inserted a few shots late:
 - [ ] rclone configured as `gdrive` with access to the shared folder
 - [ ] `python main.py compare-sd` works with SD card inserted
 - [ ] Adobe Premiere Pro installed (separate — Adobe subscription/Creative Cloud)
+#   A u t o m a t e d - s c r i p t - V 2  
+ 
