@@ -12,9 +12,26 @@ if (-not $python) {
 }
 
 $venvPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
-if (-not (Test-Path $venvPython)) {
+$venvDir = Join-Path $PSScriptRoot '.venv'
+
+function Test-VenvPython {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $false }
+    & $Path -c "import sys" 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+if (-not (Test-VenvPython $venvPython)) {
+    if (Test-Path $venvDir) {
+        Write-Host 'Removing broken .venv (often copied from another PC or old Python path)...' -ForegroundColor Yellow
+        Remove-Item -Recurse -Force $venvDir
+    }
     Write-Host 'Creating virtual environment...'
-    python -m venv .venv
+    & $python.Source -m venv $venvDir
+    if (-not (Test-VenvPython $venvPython)) {
+        Write-Host "Could not create a working venv at $venvPython" -ForegroundColor Red
+        exit 1
+    }
 }
 
 Write-Host 'Installing dependencies...'
@@ -23,6 +40,10 @@ Write-Host 'Installing dependencies...'
 
 Write-Host 'Building executable...'
 & $venvPython -m PyInstaller --noconfirm FootageWorkflow.spec
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'PyInstaller failed.' -ForegroundColor Red
+    exit 1
+}
 
 $exe = Join-Path $PSScriptRoot 'dist\FootageWorkflow.exe'
 if (Test-Path $exe) {
