@@ -80,9 +80,9 @@ $systemPython = Find-SystemPython
 if (-not $systemPython) {
     Write-Host 'Python is installed but this shell cannot find it.' -ForegroundColor Red
     Write-Host ''
-    Write-Host 'Windows often blocks the "python" command even when Python is installed:'
-    Write-Host '  • The Microsoft Store "python.exe" alias runs first (fake stub)'
-    Write-Host '  • Python was installed without "Add to PATH"'
+    Write-Host 'Windows often blocks the python command even when Python is installed:'
+    Write-Host '  - The Microsoft Store python.exe alias runs first (fake stub)'
+    Write-Host '  - Python was installed without Add to PATH'
     Write-Host ''
     Write-Host 'Try these in PowerShell (send output if build still fails):'
     Write-Host '  py -0p'
@@ -90,10 +90,9 @@ if (-not $systemPython) {
     Write-Host '  Get-ChildItem "$env:LOCALAPPDATA\Programs\Python" -Recurse -Filter python.exe'
     Write-Host ''
     Write-Host 'Quick fixes:'
-    Write-Host '  1. Settings → Apps → App execution aliases → OFF python.exe / python3.exe'
-    Write-Host '  2. Re-run Python installer → Modify → check "Add python.exe to PATH"'
-    Write-Host '  3. Or build the venv with the full path, e.g.:'
-    Write-Host '     & "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe" -m venv .venv'
+    Write-Host '  1. Settings > Apps > App execution aliases > OFF python.exe and python3.exe'
+    Write-Host '  2. Re-run Python installer > Modify > check Add python.exe to PATH'
+    Write-Host '  3. Or create the venv with: py -3 -m venv .venv'
     Write-Host ''
     Write-Host 'Or skip building: use dist\FootageWorkflow.exe (no Python needed).'
     Write-Host ''
@@ -173,6 +172,6 @@ if (Test-Path $exe) {
     Write-Host 'Each user configures drive letters and Google links in Settings on first run.'
     Write-Host ''
 } else {
-    Write-Host 'Build failed — FootageWorkflow.exe not found.' -ForegroundColor Red
+    Write-Host 'Build failed - FootageWorkflow.exe not found.' -ForegroundColor Red
     exit 1
 }
