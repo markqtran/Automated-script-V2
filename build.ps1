@@ -22,9 +22,7 @@ function Find-SystemPython {
         $ErrorActionPreference = 'Continue'
         $listed = & py -0p 2>$null
         foreach ($line in $listed) {
-            if ($line -match '-V:\s*(.+\python\.exe)\s*$') {
-                $candidate = $Matches[1].Trim()
-            } elseif ($line -match '(\S:\\.*\\python\.exe)') {
+            if ($line -match '([A-Za-z]:\\[^\s]+\\python\.exe)\s*$') {
                 $candidate = $Matches[1].Trim('*').Trim()
             } else {
                 continue
@@ -61,6 +59,8 @@ function Find-SystemPython {
 
     $patterns = @(
         "$env:LOCALAPPDATA\Programs\Python\Python*\python.exe",
+        "$env:LOCALAPPDATA\Python\pythoncore-*\python.exe",
+        "$env:LOCALAPPDATA\Python\bin\python.exe",
         "$env:ProgramFiles\Python*\python.exe",
         "${env:ProgramFiles(x86)}\Python*\python.exe"
     )
@@ -119,8 +119,8 @@ function Test-VenvUsable {
     if (Test-Path $cfg) {
         foreach ($line in Get-Content $cfg) {
             if ($line -match '^home\s*=\s*(.+)$') {
-                $home = $Matches[1].Trim().Trim('"')
-                $basePython = Join-Path $home 'python.exe'
+                $pythonHome = $Matches[1].Trim().Trim('"')
+                $basePython = Join-Path $pythonHome 'python.exe'
                 if (-not (Test-Path $basePython)) {
                     return $false
                 }
